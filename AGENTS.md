@@ -2,7 +2,7 @@
 # Workflow Rules
 
 ## Push policy
-Do not ask the user whether to push. Push changes when appropriate and expected, without asking.
+Do not auto-push. Only push when the user explicitly asks to commit/push.
 <!-- END:workflow-rules -->
 
 ## Project Context

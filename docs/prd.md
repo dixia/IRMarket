@@ -1,8 +1,10 @@
-# IRMarket 产品需求与UI设计全文档（V0.8 Veto-Market 架构版）
+# IRMarket 产品需求与UI设计全文档（V0.8.1 Veto-Market 架构版）
 
 > 本文档合并产品需求规格（PRD）与UI交互流程（UI Flow），用于整体逻辑评审、链路校验与落地对齐。
 >
 > **V0.8 变更说明**：按用户对 Monoracle 机制的深度澄清，**推翻了 V0.6/V0.7 的"IRMarket 自有资金池 + 线性合约"模型**，重构为 **Veto-Market 架构**：交易层 = Monoracle 报价否决流本身（"看多/看跌 = price verification 套利"），IRMarket 退化为薄层（市场工厂 / 持仓索引 / 费用包裹，demo 可省）。
+>
+> **V0.8.1 变更说明**：否决窗口对齐期权到期日（D-13）——引入自部署的 **MonoracleWindowed 分叉合约**（`contracts/MonoracleWindowed.sol`，派生自 `github.com/dixia/monoracle`，用户批准的唯一破例）；市场去重取消（D-14）、wrapper 不限制报价来源（D-15）、手续费统一按 HKD 计（D-16）。
 
 ## 阅读约定
 
@@ -42,18 +44,28 @@
 | R7 | §二 | "做多/做空"为线性合约语义简称 | 术语歧义 |
 | R8 | §一 | 标的真实性核实 | 事实性风险 |
 
+### V0.8 → V0.8.1（窗口对齐到期 + 分叉）
+
+| # | 位置 | 修改 | 原因 |
+|---|------|------|------|
+| R16 | 全文 | 否决窗口：2-slot 固定窗口 → **quote 级 `expiryBlock` = 期权到期日**；引入自部署分叉合约 `contracts/MonoracleWindowed.sol` | 用户 B8："放大否决窗口。窗口对齐期权到期日（本质上是一样的）"；人工签名延迟问题消失 |
+| R17 | §四/§八 | 市场注册取消去重：同标的多市场并存（不同到期/费率） | 用户 B9："一个资产可以有不同的期权，到期了再上新的，标的是一样的" |
+| R18 | §四 | wrapper 不限制报价来源（任何 provider 的报价可 veto，费用仍归注册 MM） | 用户 B10 选 b |
+| R19 | §二/§四 | 手续费统一按 HKD（quote）计：`feeBps × quoteAmount / 10000`；看涨加在付入端、看跌从收付出扣 | 用户 B11："按 quote 收取更好理解" |
+
 ---
 
 ## 〇、Monoracle 机制速览（认知基线）
 
 > 以下为 Monoracle 合约源码（`github.com/dixia/monoracle` → `contracts/Monoracle.sol`）+ tech-spec 中的真实行为。PRD 中涉及 Monoracle 的一切表述都以此为准。
+> 〔v0.8.1 R16〕IRMarket 实际交易场所是**自部署的分叉合约 `MonoracleWindowed`**（唯一改动：每笔报价带 `expiryBlock`，否决窗口 = 期权到期日，D-13）。除窗口外，机制与上游完全一致。
 
 Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，**没有链下数据源、没有多节点共识**：
 
-1. **报价（quote）**：provider 调用 `submitQuote(base, quote, baseAmount, quoteAmount)`，同时质押**两种** ERC20（标的 base + 计价 quote），确定对价：
+1. **报价（quote）**：provider 调用 `submitQuote(base, quote, baseAmount, quoteAmount, expiryBlock)`，同时质押**两种** ERC20（标的 base + 计价 quote），确定对价：
    `price = quoteAmount × 1e18 / baseAmount`（即 1 单位标的 = 多少 quote，如 1 LLM = 若干 HKD）。
    报价 = 以价格 P **双向承诺对手交易**：provider 等于同时挂了"按 P 卖 base"与"按 P 买 base"两个盘。
-2. **验证窗口**：固定 `VERIFICATION_SLOTS = 2` blocks（Monad 300ms/block，约 600ms 即 2-slot 完全终局）。窗口内报价为 `ACTIVE`。
+2. **验证窗口 = 期权到期日**（✅ D-13，〔v0.8.1 R16〕）：报价在 `expiryBlock` 前（含）始终 `ACTIVE` 可被否决；到期后才可 settle。上游固定 2-slot（≈600ms）窗口已由分叉替换——否决挑战期与期权期限是同一回事。
 3. **否决仲裁（veto）——这就是交易本身**：
    - `vetoUnderpriced(quoteId)`：否决者**支付 quoteAmount，收走 baseAmount**。语义 = 认为标的被报低了 → **按 P 买入标的（做多）**。
    - `vetoOverpriced(quoteId)`：否决者**支付 baseAmount，收走 quoteAmount**。语义 = 认为标的被报高了 → **按 P 卖出标的（做空）**。
@@ -62,7 +74,7 @@ Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，*
    - 被 underpriced 否决：provider 失去 base、留 2×quote（等于以 P 把 base 卖给了否决者）；
    - 被 overpriced 否决：provider 失去 quote、留 2×base（等于以 P 从否决者手里买了 base）。
    - 按真实价 T 计价：**否决者盈利 = provider 亏损 = |T − P| × baseAmount**。系统永远全额偿付（`Q2 不存在资不抵债`）。
-5. **结算（settle）**：窗口内无人否决，任何人（免许可）调 `settleValidQuote`，报价成为该资产对的 **canonical 有效价格**（`latestValidQuoteId`）。
+5. **结算（settle）**：到期前无人否决，任何人（免许可）在 `expiryBlock` 后调 `settleValidQuote`，报价成为该资产对的 **canonical 有效价格**（`latestValidQuoteId`）。**结算顺序**：旧报价先结算、**bot 最终报价最后结算**（保证 canonical = 终价，B12）。
 6. **提取（withdraw）**：provider 事后 `withdrawProviderFunds` 回收（有效报价原额；被否决按第 4 条取回）。
 7. **读取**：`getLatestPrice(base, quote)` → `(price, settledSlot, exists)`；永久审计读 `quotes(quoteId)`。
 
@@ -70,14 +82,14 @@ Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，*
 
 | 能力 | 由谁提供 | 说明 |
 |------|----------|------|
-| 报价提交 / 账本 / 事件 | 🔁 Monoracle 原生 | `submitQuote` + `quotes` + 5 个 indexed 事件 |
-| **多空交易撮合** | 🔁 Monoracle 原生 | veto 流 = 用户以报价价格与 provider 换手 |
-| **盈亏资产交割** | 🔁 Monoracle 原生 | veto 交易内当场换手，无后续结算动作 |
-| 验证窗口 / 仲裁 | 🔁 Monoracle 原生 | 2 slots；免许可 |
-| 有效价结算 / 读取 | 🔁 Monoracle 原生 | `settleValidQuote` / `getLatestPrice` |
-| 市场注册 / 工厂 | IRMarket 薄层（demo 可省） | 报价对即市场；createMarket = 注册配对 + bot 报价配置 |
-| 持仓索引 / UI 估值 | IRMarket 薄层 + 前端 | 监听 veto 事件 → 持仓记录；市值 = 持有量 × `getLatestPrice` |
-| 手续费（1%） | IRMarket 包裹层（若启用） | Monoracle 内无扣费位（见 R14 / Q7） |
+| 报价提交 / 账本 / 事件 | 🔁 MonoracleWindowed（IRMarket 自部署分叉，D-13） | `submitQuote(..., expiryBlock)` + `quotes` + 5 个 indexed 事件 |
+| **多空交易撮合** | 🔁 MonoracleWindowed | veto 流 = 用户以报价价格与 provider 换手 |
+| **盈亏资产交割** | 🔁 MonoracleWindowed | veto 交易内当场换手，无后续结算动作 |
+| 验证窗口 / 仲裁 | 🔁 MonoracleWindowed | **窗口 = 期权到期日**（quote 级 `expiryBlock`）；免许可 |
+| 有效价结算 / 读取 | 🔁 MonoracleWindowed | `settleValidQuote` / `getLatestPrice` |
+| 市场注册 / 工厂 | IRMarket 薄层 | createMarket 工厂；**同标的多市场并存，不去重**（D-14） |
+| 持仓索引 / UI 估值 | IRMarket 薄层 + 前端 | 监听 veto 事件 → 持仓记录；轮中按 ACTIVE 报价、到期按 `getLatestPrice` 估值（B12） |
+| 手续费（1%，HKD） | IRMarket 包裹层 | Monoracle 内无扣费位（见 R14/D-16） |
 
 > ⚠️〔v0.7 R1〕"预言机"原文误作"预言家"。
 > ⚠️〔v0.8 R9〕**修正 V0.6/V0.7 的"方向≠veto"结论**：IRMarket 的交易方向**正是** veto 的两个方向。此前将其判定为"机制误解"是错误结论，已在 V0.8 整体翻转。
@@ -107,13 +119,13 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 2. **零和全抵押**：用户盈利 = provider 抵押品亏损（`|T−P|×size`），系统内不存在资不抵债（✅ D-10）
 3. **有限风险**：用户最大亏损 = 单次 veto 投入的本金（+手续费），无爆仓、无追缴
 4. **随时平仓**：反向 veto 即平仓（bot 持续报价提供双向流动性）
-5. **高性能底层**：Monad 300ms 出块，验证窗口 ≈600ms
+5. **高性能底层**：Monad 300ms 出块；否决窗口 = 期权到期日（✅ D-13，无秒级交易竞争）
 6. **极简交互**：卡片式 UI，"看涨/看跌"两个按钮背后即两个 veto 方向
 
 ### 1.4 项目当前状态
 
-- 脚手架完成；Monoracle 仅引用上游 + 保留 ABI（`abi/Monoracle.abi.json`）
-- V0.8 架构已由用户确认（D-07~D-10）；剩 Q7（demo 手续费方案）待拍板
+- 脚手架完成；`contracts/MonoracleWindowed.sol` 分叉合约已就位（唯一改动：quote 级 `expiryBlock` 窗口，D-13）+ 6 个窗口测试通过；`abi/Monoracle.abi.json` 已由分叉构建重新生成
+- V0.8.1 架构已由用户确认（D-07~D-16）
 - Demo 进入开发准备阶段
 
 ---
@@ -126,8 +138,8 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **交易方向**（✅ D-08，〔v0.8 R9〕）：
   - **看涨开仓 = `vetoUnderpriced`**：用户付 HKD，收 LLM → 做多 LLM
   - **看跌开仓 = `vetoOverpriced`**：用户付 LLM，收 HKD → 做空 LLM
-  - 用户钱包**直接调用 Monoracle 合约**（与报价/结算同一个合约，〔v0.8 R15〕）
-- **期限**：Demo 默认 **3 分钟**（✅ D-01，≈600 blocks）；UI 保留多期限选择。期限作用于"到期定标"（bot 最终报价）与 UI 倒计时，不影响单笔 veto 结算
+  - 用户钱包**直接调用 MonoracleWindowed 合约**（与报价/结算同一个合约，〔v0.8 R15〕；或经 IRMarket 包裹层扣费，D-11）
+- **期限**：Demo 默认 **3 分钟**（✅ D-01，≈600 blocks）；UI 保留多期限选择。**期限即报价的 `expiryBlock`**（✅ D-13）：否决挑战期 = 期权期限，到期定标（bot 最终报价）+ UI 倒计时
 - **结算资产**：测试币 `HKD`（计价）/ `LLM`（标的），MockERC20 自铸（Monad 测试网无官方币）；报价对 = `(base=LLM, quote=HKD)`，价格 = HKD/LLM
 - **风险机制**：无爆仓、无追缴、无强平；最大亏损 = 投入本金。⚠️ 期权/杠杆术语已弃用，即"以 P 价格换手后承担标的涨跌"的现货式敞口
 - **价格基准**：全部盈亏以 `getLatestPrice` 为准（开仓价 = 被否决报价的 price；终价 = 到期 bot 最终报价，✅ D-06）
@@ -138,7 +150,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 > 🔁 **bot（provider）= 做市商**：抓取 06658.HK 真实行情 → 以公平价 P 持续 `submitQuote`（双边质押）。bot 的报价 = 市场的双向流动性，用户任何时刻对任意 ACTIVE 报价 veto 即成交。
 
 1. **定价锚点**：bot 报价严格锚定真实市场价 P（否则被套利者否决、损失 `|T−P|×size`——这是 Monoracle 原生约束，bot 无需自研风控）
-2. **手续费（✅ D-11，已拍板：方案 1 包裹扣费）**：〔v0.8 R14〕交易经 **IRMarket 包裹层入口**，进 veto 前按名义额**显式扣除 1%** 至做市商地址，再代用户执行 veto。费用**不**嵌入报价价差（任何系统性偏离公平价都会被否决套利瞬间吃掉）
+2. **手续费（✅ D-11/D-16，已拍板：方案 1 包裹扣费，统一 HKD）**：〔v0.8 R14〕交易经 **IRMarket 包裹层入口**，进 veto 前按名义额**显式扣除 1%** 至做市商地址（`feeBps × quoteAmount / 10000`，HKD 计）：看涨加在付入端、看跌从收付出扣。费用**不**嵌入报价价差（任何系统性偏离公平价都会被否决套利瞬间吃掉）
 3. **收益归属**：1% 手续费归 bot/做市商；bot 的对赌盈亏 = 用户盈亏的镜像
 4. **用户感知**：UI 明确展示"将以报价 P 与做市商换手 + 手续费 1%"（显式展示，不做隐性价差）
 
@@ -150,12 +162,12 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
   - 看涨持仓（持有 LLM）→ 对后续 bot 报价执行 `vetoOverpriced` → 付 LLM 收回 HKD
   - 看跌持仓（持有 HKD）→ 执行 `vetoUnderpriced` → 付 HKD 收回 LLM
   - bot 持续报价即持续提供双向平仓流动性
-- **报价可用性**：bot 每轮报价仅 2-slot 窗口可 veto；bot 停报/抵押耗尽 = 市场自然停牌（✅ D-10，非资不抵债）。前端需展示"可交易报价/无可用报价"状态（🚧 B4 降级）
+- **报价可用性**：报价在 `expiryBlock` 前**全程可 veto**（✅ D-13，无 600ms 窗口竞争）；bot 报价被否决后**立即补报**（restocking），保持市场始终有可交易报价；bot 停报/抵押耗尽 = 市场自然停牌（✅ D-10，非资不抵债）。前端需展示"可交易报价/无可用报价"状态（🚧 B4 降级）
 - **成交价锚定**：用户对**具体 quoteId** 的报价价 P 成交，无滑点（所见即所成交）；但报价会随 bot 新报更新（B4 备注）
 
 ### 2.4 结算规则（✅ D-09，〔v0.8 R11〕）
 
-- **触发**：到期时 bot 提交**最终报价**（真实终价）并 `settleValidQuote`（✅ D-06）→ `getLatestPrice` 即到期定标价
+- **触发**：到期时 bot 提交**最终报价**（真实终价）；到期后按序结算——**旧报价先结算、最终报价最后结算**（✅ D-06/B12）→ `getLatestPrice` 即到期定标价
 - **盈亏**（线性差价，✅ D-02 公式保留）：
   - 看涨：`PNL = (终价 − 开仓价) × 份数`；看跌：`PNL = (开仓价 − 终价) × 份数`
   - 份数 = veto 收到的标的数量（看涨收 LLM 即份数；看跌按名义额折算）
@@ -168,16 +180,16 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 ### 3.1 前置流程：bot 建市（Demo 阶段）
 
 1. （脚本）铸币：`LLM`、`HKD` 测试币 → 分发给 bot 与用户（faucet）
-2. （脚本）bot 授权 Monoracle 动用 LLM/HKD（approve）
-3. （bot）拉取 06658.HK 真实行情 → 按公平价 P 提交首笔报价 `submitQuote`（🔁 双边质押；窗口 2 slots）
-4. （bot）每轮报价后：窗口无否决则 `settleValidQuote` → `withdrawProviderFunds` 回收 → 立即发起下一轮报价（循环，✅ D-05 可配间隔）
-5. （可选薄层）IRMarket `createMarket(base, quote, 期限, bot 配置)` 注册市场（demo 可仅靠前端配置表）
+2. （脚本）bot 授权 MonoracleWindowed 动用 LLM/HKD（approve）
+3. （bot）拉取 06658.HK 真实行情 → 按公平价 P 提交首笔报价 `submitQuote(..., expiryBlock)`（🔁 双边质押；`expiryBlock` = 本轮到期块，D-13）
+4. （bot）报价被否决 → `withdrawProviderFunds` 回收后**立即补报**（restocking）；未否决报价到期后按序 `settleValidQuote` 回收（✅ D-05 间隔可配）
+5. IRMarket `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 注册市场（✅ D-14：同标的多市场并存，不去重）
 6. 市场生效：用户可对任意 ACTIVE 报价 veto
 
 ### 3.2 用户开仓流程（以看跌/做空为例）
 
 1. 连接钱包（Monad 10143）；从 faucet 领取 LLM/HKD
-2. 市场列表选标的 → 详情页显示"当前 bot 报价 P（可 veto 窗口倒计时）"
+2. 市场列表选标的 → 详情页显示"当前 bot 报价 P（到期倒计时）"
 3. 切「看跌」Tab，输入金额（LLM 数量）
 4. 前端预览：将执行 `vetoOverpriced(quoteId#N)`，付 LLM、收 HKD，成交价 P
 5. 用户签名 → Monoracle 执行 veto → 资产当场换手到账
@@ -185,7 +197,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### 3.3 持仓与反向平仓流程
 
-1. 持仓页：显示持仓资产余额（如"持有 HKD 8,000 / 空头 06658.HK"）+ 浮盈（= 持仓市值 @ `getLatestPrice` − 开仓成本）
+1. 持仓页：显示持仓资产余额（如"持有 HKD 8,000 / 空头 06658.HK"）+ 浮盈（轮中按最新 ACTIVE 报价估值、到期按 `getLatestPrice`，B12）
 2. 点「反向平仓」→ 前端选定当前 ACTIVE 报价 → 预览反向 veto（付 HKD、收回 LLM 本金+浮盈）
 3. 签名 → Monoracle 执行反向 veto → 资产换回，仓位关闭
 
@@ -201,35 +213,36 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### 4.1 智能合约层
 
-#### 4.1.1 Monoracle（🔁 交易与结算全责，上游合约）
+#### 4.1.1 MonoracleWindowed（🔁 交易与结算全责，IRMarket 自部署分叉）
 
-- 报价、否决（多空换手）、结算、提取、价格读取**全部由 Monoracle 承担**，IRMarket **不复制任何结算逻辑**（〔v0.8 R15〕："是同一个智能合约"）
-- 本项目仅保留 `abi/Monoracle.abi.json` 引用上游 `github.com/dixia/monoracle`
+- 报价、否决（多空换手）、结算、提取、价格读取**全部由 MonoracleWindowed 承担**，IRMarket **不复制任何结算逻辑**（〔v0.8 R15〕："是同一个智能合约"）
+- 分叉来源：上游 `github.com/dixia/monoracle`（`contracts/Monoracle.sol`）；唯一改动 = quote 级 `expiryBlock` 窗口（✅ D-13，用户批准的唯一破例）
+- `abi/Monoracle.abi.json` 由分叉构建生成
 
-#### 4.1.2 IRMarket 薄层（✅ D-11：demo 纳入费用包裹）
+#### 4.1.2 IRMarket 薄层（✅ D-11/D-14：费用包裹 + 工厂）
 
-- `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 工厂注册（✅ D-07：报价对 = 市场；Q6 工厂模式）
-- **费用包裹（D-11）**：入口函数扣 1% → 代用户执行 veto（看涨/看跌两个入口函数）；扣费后剩余按目标 veto 换手
+- `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 工厂注册——**不去重**（D-14）：同一标的可并存多个市场（不同到期/费率），每轮 = 新 marketId
+- **费用包裹（D-11/D-16）**：入口函数按 HKD 名义额扣 1%（看涨加付入端、看跌从收付出扣）→ 代用户执行 veto（看涨/看跌两个入口函数）
 - 持仓索引：可选，监听 veto 事件落库；前端亦可纯事件驱动，不需要链上账本
 
 #### 4.1.3 定价与费用模块
 
 - 价格读取：`getLatestPrice`（🔁）；"价格有效性"由否决仲裁机制原生保证，无需额外校验
-- 费用：✅ D-11 包裹层显式扣 1%（详见 §二 2.2）
+- 费用：✅ D-11/D-16 包裹层显式扣 1%（HKD 计，详见 §二 2.2）
 
 ### 4.2 做市商报价 bot（Demo 版）
 
-- 核心：拉取 06658.HK 真实行情 → 循环 `submitQuote`（双边质押）→ settle → withdraw → 下一轮（✅ D-05 间隔可配 `QUOTE_INTERVAL_SECONDS/BLOCKS`）
-- 到期：提交最终报价（✅ D-06，`SETTLEMENT_QUOTE_LEAD_BLOCKS` 提前量）
-- 风控：bot 自身报价即对手方敞口；被否决 = 正常赔付（零和），bot 无需额外对冲逻辑
+- 核心：拉取 06658.HK 真实行情 → 循环 `submitQuote(..., expiryBlock=本轮到期块)`（双边质押）→ 被否决即 withdraw + 补报 → 到期按序 settle（旧先新后）→ withdraw（✅ D-05 间隔可配 `QUOTE_INTERVAL_SECONDS/BLOCKS`）
+- 到期：提交最终报价并**最后结算**（✅ D-06/B12，`SETTLEMENT_QUOTE_LEAD_BLOCKS` 提前量）
+- 风控：bot 自身报价即对手方敞口；被否决 = 正常赔付（零和），bot 无需额外对冲逻辑；未否决报价抵押锁定至到期（B12 资本预算）
 - 参考实现：monoracle `bot/verifier.py`（否决侧）与 `script/demo.js`（报价侧）改造而来
 
 ### 4.3 前端功能模块
 
 - 钱包连接/网络校验（10143）+ 测试币 faucet 领取
 - 市场列表（报价对 + 到期倒计时）
-- 交易面板：当前 ACTIVE 报价展示（价格 + 窗口倒计时）+ 看涨/看跌按钮（映射两个 veto）
-- 持仓管理：资产余额、浮盈（`getLatestPrice` 估值）、反向平仓
+- 交易面板：当前 ACTIVE 报价展示（价格 + 到期倒计时）+ 看涨/看跌按钮（映射两个 veto）
+- 持仓管理：资产余额、浮盈（轮中按 ACTIVE 报价、到期按 `getLatestPrice` 估值，B12）、反向平仓
 - 到期估值展示（无结算/领取按钮）
 
 ---
@@ -254,7 +267,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **标的详情页（核心交易页）**：
   - 左卡：标的信息、当前链上报价（Monoracle 源）、到期信息
   - 右卡（交易面板）：
-    - 顶部：当前可 veto 报价卡片：`报价 P`、`报价窗口倒计时（~600ms）`、`无可用报价` 降级态（🚧 B4）
+    - 顶部：当前可 veto 报价卡片：`报价 P`、`到期倒计时（本轮到期块）`、`无可用报价` 降级态（🚧 B4）
     - Tab：看涨（做多）/ 看跌（做空），选中黄色填充
     - 输入金额 + 可用余额（看涨显示 HKD 余额，看跌显示 LLM 余额）
     - 预览：`将按 P 价格与做市商换手：付 X HKD / 收 Y LLM（或反之）` + `手续费 1%（D-11 显式展示）` + 最大亏损提示（= 投入本金）
@@ -279,11 +292,11 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 | 标的 | 溜溜梅（06658.HK / HKG:6658，✅ D-12 已确认），bot 接真实行情 | 多标的、用户自定义标的 |
 | 交易 | 看涨/看跌 veto 开仓、反向 veto 平仓、到期 UI 估值（✅ D-08/D-09） | 限价单、止盈止损、杠杆/保证金 |
 | 做市商 | bot 持续报价（✅ D-05 可配间隔）+ 到期终报（✅ D-06） | 多做市商、分级基金（Stage 2） |
-| 价格 | Monoracle 报价 + 否决仲裁（🔁 原生，非"单节点"） | 多报价聚合 |
-| 费用 | ✅ D-11：IRMarket 包裹层显式扣 1% | 动态费率、嵌入报价价差（不可行） |
+| 价格 | MonoracleWindowed 报价 + 否决仲裁（🔁 自部署分叉，窗口=到期 D-13） | 多报价聚合 |
+| 费用 | ✅ D-11/D-16：IRMarket 包裹层显式扣 1%（HKD 计） | 动态费率、嵌入报价价差（不可行） |
 | 资产 | HKD/LLM 测试币（MockERC20）+ faucet | 多币种、稳定币、真实法币通道 |
-| 前端 | 市场列表、交易面板（报价+倒计时）、持仓/浮盈、到期估值 | 高级K线、深度图 |
-| 合约 | Monoracle（上游）+ 可选 IRMarket 薄层 | IRMarket 全功能市场合约 |
+| 前端 | 市场列表、交易面板（报价+到期倒计时）、持仓/浮盈、到期估值 | 高级K线、深度图 |
+| 合约 | MonoracleWindowed（自部署分叉）+ IRMarket 薄层（工厂+费用包裹） | IRMarket 全功能市场合约 |
 
 ---
 
@@ -292,12 +305,13 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 1. ✅〔v0.8〕架构：交易 = Monoracle veto 流；看多/看跌 = 两个否决方向（D-07/D-08）
 2. ✅ 对手方：bot 双边抵押零和承接，无资不抵债（D-10；原 B1/B2 卡点关闭）
 3. ✅ 结算：到期 bot 终报定标 + UI 估值，无链上结算/领取（D-09；Q4 答案）
-4. ✅ 手续费：IRMarket 包裹层显式扣 1%（D-11）
-5. ✅ 报价节奏：可配间隔，3min 内完成全链路（D-05）
+4. ✅ 手续费：IRMarket 包裹层显式扣 1%（D-11），HKD 计（D-16）
+5. ✅ 报价节奏：可配间隔，3min 内完成全链路（D-05）；否决窗口 = 到期（D-13）
 6. ✅ UI 链路：faucet→开仓(veto)→持仓→反向平仓→到期估值，无断点
 7. ✅ 设计风格：卡片式、黄色主色
 8. ⚠️ 标的：溜溜梅 06658.HK 已确认（D-12）；真实行情源的接入方式待开发时确认（bot 拉数源）
-9. ❓ 其他遗漏场景（请在下方反馈）
+9. ✅〔v0.8.1〕窗口/分叉：MonoracleWindowed 已编译 + 6 窗口测试通过；市场不去重（D-14）、不限报价来源（D-15）
+10. ❓ 其他遗漏场景（请在下方反馈）
 
 ---
 
@@ -310,7 +324,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **D-03（V0.8 重写）**：平仓对手方 = bot 的 Monoracle 双边抵押（veto 流内换手，✓ 技术可行——不再需要 IRMarket 自有池）
 - **D-04（V0.8 重写）**：到期无强制结算/领取；bot 终报定标（D-06）+ UI 估值展示
 - **D-05 报价频率**：bot 持续报价，间隔可配（`bot/.env`），适配 3min Demo 周期
-- **D-06 最终报价结算**：到期 bot 再报一笔并 settle（2-slot ≈600ms 后成 canonical），即定标价
+- **D-06 最终报价结算**：到期 bot 再报一笔；到期后按序 settle——旧报价先、最终报价最后（B12），`getLatestPrice` 即终价（〔v0.8.1〕原文"2-slot ≈600ms 后成 canonical"已随 D-13 更新为"expiryBlock 后"）
 
 ### V0.8 新增决策（D-07 ~ D-12，用户确认）
 
@@ -321,9 +335,16 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **D-11 手续费**：IRMarket 包裹层入口显式扣 1% 给做市商，再代用户执行 veto（Q7 方案 1；费用不嵌入报价价差）
 - **D-12 标的**：溜溜梅（06658.HK / HKG:6658），已最终确认，不再变更
 
+### V0.8.1 新增决策（D-13 ~ D-16，用户确认）
+
+- **D-13 窗口 = 期权到期日**：否决窗口由上游固定 2-slot 放大为 **quote 级 `expiryBlock` = 本轮到期块**（否决挑战期与期权期限是同一回事）；实现 = 自部署分叉 `contracts/MonoracleWindowed.sol`（派生上游，唯一改动，用户批准的唯一破例）
+- **D-14 市场不去重**：同一标的多市场并存（不同到期/费率），到期后再上新轮次；createMarket 永远新建 marketId
+- **D-15 不限报价来源**：wrapper 允许 veto 任何 provider 的报价；1% 费用归注册 MM
+- **D-16 手续费 HKD 计**：`feeBps × quoteAmount / 10000`（HKD）；看涨加在付入端、看跌从收付出扣
+
 ---
 
-## 九、卡点清单（V0.8）
+## 九、卡点清单（V0.8.1）
 
 > 严重程度：高 = 阻塞开发；中 = 阻塞对应模块；低 = 文案/事实性。
 
@@ -331,15 +352,20 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 |---|------|:---:|------|
 | B1 | ~~PNL 偿付资金来源~~ | ~~高~~ | ✅ 关闭：V0.8 veto 流内换手，零和全抵押（D-10） |
 | B2 | ~~池余额不足~~ | ~~高~~ | ✅ 关闭：不存在的问题（D-10） |
-| B3 | ~~手续费无处扣~~ | ~~中~~ | ✅ 关闭：D-11 包裹层显式扣 1%（Q7 方案 1） |
-| B4 | **报价可用性/滑点**：报价仅 2-slot 窗口可 veto；bot 停报时无交易机会；两轮报价间价格可能变动（用户按具体 quoteId 成交，无滑点但需 UI 展示待成交报价） | **中** | 前端降级态 + 窗口倒计时（已列入 §五）；bot 间隔调优 |
-| B5 | **标的行情源**：06658.HK 真实行情接入（bot 拉数源）与"溜溜梅"叙事不符，需确定数据源 | **低** | 开发时确认 |
+| B3 | ~~手续费无处扣~~ | ~~中~~ | ✅ 关闭：D-11/D-16 包裹层显式扣 1%（HKD 计） |
+| B4 | **报价可用性**：bot 停报/抵押耗尽时无交易机会（自然停牌）；两轮报价间价格可能变动（用户按具体 quoteId 成交，无滑点但需 UI 展示待成交报价） | **中** | 前端"无可用报价"降级态 + 到期倒计时（已列入 §五）；bot restocking 间隔调优 |
+| B5 | **标的行情源**：06658.HK 真实行情接入（bot 拉数源） | **低** | 开发时确认 |
 | B6 | 术语已统一（预言机、多空=veto 别名、provider=bot/做市商） | 低 | ✅ 完成 |
-| B7 | bot 抵押循环：每轮报价需 settle+withdraw 回收后再报 | 低 | ✅ bot PRD FR-BOT-001 覆盖 |
+| B7 | bot 抵押循环：被否决报价需 withdraw 回收后补报 | 低 | ✅ bot PRD FR-BOT-001 覆盖 |
+| B8 | ~~否决窗口 vs 人工签名延迟~~ | ~~高~~ | ✅ 关闭：D-13 窗口=期权到期日（quote 级 expiryBlock） |
+| B9 | ~~市场重开/去重~~ | ~~中~~ | ✅ 关闭：D-14 不去重，同标的多市场并存 |
+| B10 | ~~wrapper 报价来源~~ | ~~低~~ | ✅ 关闭：D-15 不限 provider |
+| B11 | ~~做空费币种~~ | ~~低~~ | ✅ 关闭：D-16 统一 HKD |
+| B12 | **bot 资本与估值**：未否决报价抵押锁定至到期（bot 资本 = 轮内报价数 × 单笔规模）；轮中 `getLatestPrice` 无新 settle → 浮盈改读 ACTIVE 报价事件；到期按序 settle（旧先、终报最后）保 canonical=终价 | **低** | 已写入 bot 设计 + §5.4/sc-tech-spec §5；demo 铸币充足 |
 
 ---
 
-## 十、歧义确认清单（V0.8）
+## 十、歧义确认清单（V0.8.1）
 
 ### 已回答（Q1 ~ Q6）
 
@@ -350,8 +376,16 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **Q5（标的）→ 答案 B**：真实 ticker 06658.HK（HKG:6658）
 - **Q6（市场创建）→ 答案**：工厂 OK；市场 = 报价对，需按 Monoracle 合约结构规划（D-07）
 
-### ❓ Q7（中）→ ✅ 已拍板（D-11）
-- 选 **方案 1**：交易经 IRMarket 包裹层入口，进 veto 前按名义额显式扣 1% 给做市商
+### ❓ Q7（中）→ ✅ 已拍板（D-11/D-16）
+- 选 **方案 1**：交易经 IRMarket 包裹层入口，进 veto 前按名义额显式扣 1% 给做市商（HKD 计）
 
 ### ❓ Q8（低）→ ✅ 已拍板（D-12）
 - 标的就用 **溜溜梅（06658.HK）**，已确认，不再变更
+
+### V0.8.1 评审已拍板（B8 ~ B11 对应）
+
+- **B8（窗口 vs 人工延迟）→ 答案**："放大否决窗口，窗口对齐期权到期日（本质上是一样的）"→ **D-13**：quote 级 `expiryBlock` = 本轮到期块；自部署分叉 `MonoracleWindowed`
+- **B9（市场重开/去重）→ 答案**："一个资产可以有不同的期权，到期了再上新的，标的是一样的"→ **D-14**：不去重，多市场并存
+- **B10（报价来源）→ 答案 b**：不限制 → **D-15**
+- **B11（做空费币种）→ 答案**："按 quote 收取更好理解"→ **D-16**：统一 HKD
+- **分叉位置 → 答案 a**：分叉到 IRMarket repo（`contracts/MonoracleWindowed.sol`，用户批准的唯一破例）
