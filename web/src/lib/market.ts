@@ -1,13 +1,18 @@
-import artifact from "./abi.json";
+import type { Abi, Address } from "viem";
+import { MONORACLE_ABI } from "./abis/oracle";
+import { BASE_TOKEN, EXPLORER_BASE, ORACLE_ADDRESS, QUOTE_TOKEN, isFullyConfigured } from "./config";
 
-function requireEnv(name: string, val: string | undefined): string {
-  if (!val) throw new Error(`Missing required env var: ${name}`);
-  return val;
-}
+export const EXPLORER_URL = ORACLE_ADDRESS
+  ? `${EXPLORER_BASE}/address/${ORACLE_ADDRESS}`
+  : EXPLORER_BASE;
 
-export const MARKET_ADDRESS = requireEnv("NEXT_PUBLIC_MARKET_ADDRESS", process.env.NEXT_PUBLIC_MARKET_ADDRESS);
-export const MARKET_ABI = artifact.abi;
-export const EXPLORER_BASE = "https://testnet.monadscan.com";
-export const EXPLORER_URL = `${EXPLORER_BASE}/address/${MARKET_ADDRESS}`;
-export const RPC_URL = requireEnv("NEXT_PUBLIC_RPC_URL", process.env.NEXT_PUBLIC_RPC_URL);
-export const CHAIN_ID = Number(requireEnv("NEXT_PUBLIC_CHAIN_ID", process.env.NEXT_PUBLIC_CHAIN_ID));
+export const marketOracleParams = isFullyConfigured
+  ? { address: ORACLE_ADDRESS as Address, abi: MONORACLE_ABI as Abi }
+  : null;
+
+export const PAIR = isFullyConfigured
+  ? {
+      base: BASE_TOKEN as Address,
+      quote: QUOTE_TOKEN as Address,
+    }
+  : null;

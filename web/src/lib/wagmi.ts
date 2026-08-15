@@ -2,13 +2,8 @@ import { http, createConfig } from "wagmi";
 import { monadTestnet } from "wagmi/chains";
 import { metaMask, injected } from "wagmi/connectors";
 
-function requireEnv(name: string, val: string | undefined): string {
-  if (!val) throw new Error(`Missing required env var: ${name}`);
-  return val;
-}
-
-const RPC_URL = requireEnv("NEXT_PUBLIC_RPC_URL", process.env.NEXT_PUBLIC_RPC_URL);
-const CHAIN_ID = Number(requireEnv("NEXT_PUBLIC_CHAIN_ID", process.env.NEXT_PUBLIC_CHAIN_ID));
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet-rpc.monad.xyz";
+const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 10143);
 
 const chain = {
   ...monadTestnet,
