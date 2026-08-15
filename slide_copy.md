@@ -1,47 +1,46 @@
-# slide_copy.md — IRMarket Pitch Deck (4 pages)
+# slide_copy.md — IRMarket Pitch Deck (中文版 4 页)
 
 ---
 
-## PAGE 1 — Cover
+## PAGE 1 — 封面
 
 **IRMarket**
 
-Trade call/put options on anything with a price — on Monad.
+任何有价格的资产都能交易期权。可以做空 A 股、做空 Labubu、做空任何东西。
 
-Team: d1xia
-
----
-
-## PAGE 2 — What We Do
-
-**An on-chain option market on any priced asset.**
-
-- Pick a market: A-share stocks, Labubu, anything with a price
-- Choose **call / put**, invest HKD, get position units instantly
-- Linear spread PNL at expiry — no liquidation, no margin calls, max loss = principal
-- Default 3-minute expiry, reverse-close anytime
-- Settlement price comes from **Monoracle's veto-arbitrage primitive**:
-  bilateral collateral + permissionless on-chain arbitration
-- No off-chain data feeds, no validators — price integrity by design
+团队：d1xia
 
 ---
 
-## PAGE 3 — How We're Different
+## PAGE 2 — 为什么需要做空
 
-| | Others | IRMarket |
-|---|---|---|
-| Price source | Off-chain feed / validators | On-chain veto-arbitrage oracle |
-| Listings | Platform-approved | Anyone opens a market |
-| Risk model | Margin / forced liquidation | Fixed-loss options, capped at principal |
-| Complexity | Derivatives expertise needed | One-tap call/put, prediction-market UI |
-| Settlement | Trusted centralized rule | Collateral + permissionless arbitration |
+**不能做空的市场，只会奖励不理性。**
 
-- **Any priced asset** — not just whitelisted coins
-- **Trustless settlement** — enforced by collateral and arbitrage, not data feeds
-- **Simple enough for anyone** — lightweight card UI, no option jargon
+- 很多市场没有便捷的做空渠道，泡沫来了，看空的人只能看着，没法用行动表达判断
+- 传统衍生品门槛极高——比如 A 股期权最小单位 10 万，普通人根本参与不了价格发现
+- 做空是价格发现的核心——它让理性的人有机会做对的事
+
+IRMarket 让任何资产都能被免许可地做空。
+
+---
+
+## PAGE 3 — 我们做了什么
+
+**Monad 上的免许可二元期权市场。**
+
+- 任何资产都能开市场——A 股、Labubu，只要有价格，任何人都能发
+- 看涨/看跌——投入 HKD 立刻拿到仓位，最大亏损就是本金，不会爆仓、不会追缴
+- 可以做空任何东西——包括 A 股这种在别处根本没法空的
+- 默认 3 分钟到期，随时可以反向平仓
+
+结算价全部在链上完成，不需要链下预言机，也不需要信任任何节点。
 
 ---
 
 ## PAGE 4 — Demo
 
-**demo**
+**Demo**
+
+已上线 Monad，任何有价格的资产都能交易期权
+
+线上地址：irmarket-g6pflvq3o-h-fbf5.vercel.app

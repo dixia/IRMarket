@@ -5,7 +5,9 @@ export const PRICE_DECIMALS = 18n;
 /** price is quote-per-base in 1e18 fixed-point. */
 export function formatPrice(price: bigint | undefined, decimals = 6): string {
   if (price === undefined) return "—";
-  return toNumberString(price, decimals);
+  // rescale 1e18 fixed-point → 10^decimals before generic formatting
+  const scaled = price / 10n ** (18n - BigInt(decimals));
+  return toNumberString(scaled, decimals);
 }
 
 export function toNumberString(value: bigint, decimals = 4): string {
@@ -42,7 +44,9 @@ export function pnlBig(value: bigint, cost: bigint): bigint {
 
 export function formatPnl(pnl: bigint | undefined): string {
   if (pnl === undefined) return "—";
-  const s = toNumberString(pnl < 0n ? -pnl : pnl, 4);
+  // pnl is 1e18-scaled HKD; rescale to 1e4 (4 decimals) for display
+  const scaled = (pnl < 0n ? -pnl : pnl) / 10n ** 14n;
+  const s = toNumberString(scaled, 4);
   return `${pnl < 0n ? "-" : "+"}${s}`;
 }
 

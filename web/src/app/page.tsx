@@ -6,14 +6,16 @@ import { MarketCard } from "@/components/market/MarketCard";
 import { FaucetModal } from "@/components/faucet/FaucetModal";
 import { useMarkets } from "@/hooks/useMarkets";
 import { useBalances } from "@/hooks/useBalances";
+import { useHydrated } from "@/hooks/useHydrated";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { formatAmount } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
 
 export default function HomePage() {
+  const mounted = useHydrated();
   const { address } = useAccount();
   const markets = useMarkets();
-  const balances = useBalances(address);
+  const balances = useBalances(mounted ? address : undefined);
   const [faucetOpen, setFaucetOpen] = useState(false);
 
   const market = markets.length > 0 ? markets[0] : undefined;
@@ -43,7 +45,7 @@ export default function HomePage() {
           >
             领取测试币
           </button>
-          {address && (
+          {mounted && address && (
             <span className="text-text-dim">
               钱包余额 · HKD <span className="text-primary">{formatAmount(balances.hkd, 18, 2)}</span>
               {"  ·  "}

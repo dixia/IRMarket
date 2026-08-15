@@ -1,19 +1,18 @@
 "use client";
 
 import { useAccount, useSwitchChain } from "wagmi";
-import { useEffect } from "react";
+import { useHydrated } from "@/hooks/useHydrated";
 import { CHAIN_ID } from "@/lib/config";
 
 /** Detects wrong network and offers a one-click switch to Monad Testnet (10143). */
 export function NetworkBadge() {
+  // Hydration-safe: renders null until after hydration (matches SSR HTML), so a
+  // rehydrated account can't cause a client/server render mismatch.
+  const mounted = useHydrated();
   const { isConnected, chainId } = useAccount();
   const { switchChain } = useSwitchChain();
 
-  useEffect(() => {
-    // no-op; switch is user-triggered below to avoid silent network changes
-  }, []);
-
-  if (!isConnected || chainId === CHAIN_ID) return null;
+  if (!mounted || !isConnected || chainId === CHAIN_ID) return null;
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-bear/40 bg-bear/10 px-3 py-2 text-sm">

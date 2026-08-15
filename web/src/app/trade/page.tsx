@@ -7,7 +7,7 @@ import { TradePanel } from "@/components/trade/TradePanel";
 import { useMarkets } from "@/hooks/useMarkets";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { BlockCountdown } from "@/components/market/BlockCountdown";
-import { toNumberString } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
 
 export default function TradePage() {
@@ -59,7 +59,7 @@ function TradeContent() {
             label="当前价格"
             value={
               price.status === "ok"
-                ? `${toNumberString(price.price, 6)} HKD`
+                ? `${formatPrice(price.price)} HKD`
                 : price.status === "settling"
                   ? "结算中"
                   : "—"

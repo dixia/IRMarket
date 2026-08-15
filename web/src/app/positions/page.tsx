@@ -5,6 +5,7 @@ import { useAccount } from "wagmi";
 import { useMarkets } from "@/hooks/useMarkets";
 import { usePositions } from "@/hooks/usePositions";
 import { useQuotes } from "@/hooks/useQuotes";
+import { useHydrated } from "@/hooks/useHydrated";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { PositionCard, computePositionValuation } from "@/components/position/PositionCard";
 import { ClosePanel } from "@/components/position/ClosePanel";
@@ -13,7 +14,9 @@ import { isFullyConfigured } from "@/lib/config";
 import type { Position } from "@/lib/types";
 
 export default function PositionsPage() {
+  const mounted = useHydrated();
   const { address } = useAccount();
+  const account = mounted ? address : undefined;
   const markets = useMarkets();
   const market = markets.length > 0 ? markets[0] : undefined;
 
@@ -22,7 +25,7 @@ export default function PositionsPage() {
     [market],
   );
 
-  const { positions, refetch } = usePositions(address);
+  const { positions, refetch } = usePositions(account);
   const priceState = useReferencePrice(pair);
   const blockNumber = useCurrentBlock();
   const { activeQuotes } = useQuotes(pair);
@@ -82,7 +85,7 @@ export default function PositionsPage() {
         </div>
       </section>
 
-      {!address ? (
+      {!account ? (
         <p className="rounded-lg border border-card-border bg-card p-4 text-sm text-text-dim">
           连接钱包以查看持仓。
         </p>

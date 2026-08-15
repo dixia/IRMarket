@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { Quote, Side } from "@/lib/types";
-import { computeFee, formatAmount, toNumberString } from "@/lib/format";
+import { computeFee, formatAmount, formatPrice } from "@/lib/format";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useBalances } from "@/hooks/useBalances";
+import { useHydrated } from "@/hooks/useHydrated";
 import { useAllowance, payableFor, useTrade, TradeKind } from "@/hooks/useTrade";
 import { TxStatusCard, mapTransactionError, TxState } from "@/components/common/TxStatusCard";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
@@ -26,7 +27,7 @@ function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint |
         )}
       </div>
       <div className="mt-1 text-2xl font-bold text-primary">
-        {toNumberString(quote.price, 6)} HKD/LLM
+        {formatPrice(quote.price)} HKD/LLM
       </div>
       <div className="mt-1 text-xs text-text-dim">
         报价规模（整单成交）: 付 {formatAmount(quote.quoteAmount, 18, 4)} HKD / 收 {formatAmount(quote.baseAmount, 18, 4)} LLM
@@ -48,10 +49,12 @@ export function TradePanel({
   feeBps: bigint;
   initialSide?: Side;
 }) {
+  const mounted = useHydrated();
   const { address } = useAccount();
+  const account = mounted ? address : undefined;
   const { activeQuotes } = useQuotes(baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null);
   const blockNumber = useCurrentBlock();
-  const balances = useBalances(address);
+  const balances = useBalances(account);
   // null until the user picks a tab; then it locks in (route side only pre-selects).
   const [manualSide, setManualSide] = useState<Side | null>(null);
   const side: Side = manualSide ?? initialSide ?? "bull";
@@ -85,7 +88,7 @@ export function TradePanel({
 
   // allowance gating
   const payable = payableFor(side, "open", true);
-  const { data: allowance } = useAllowance(payable.token, address, payable.spender);
+  const { data: allowance } = useAllowance(payable.token, account, payable.spender);
   const requiredAmount = preview?.payAmount ?? 0n;
 
   const request = useMemo(() => {
@@ -124,9 +127,9 @@ export function TradePanel({
     return { status: "idle" };
   }, [trade]);
 
-  const canTrade = isFullyConfigured && !!address && !!selected && !insufficientBalance && !trade.phase?.startsWith("approv") && trade.phase !== "trading";
+  const canTrade = isFullyConfigured && !!account && !!selected && !insufficientBalance && !trade.phase?.startsWith("approv") && trade.phase !== "trading";
 
-  const buttonLabel = !address
+  const buttonLabel = !account
     ? "连接钱包"
     : !selected
       ? "无可用报价"
@@ -197,7 +200,7 @@ export function TradePanel({
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">成交价</span>
-              <span>{selected ? toNumberString(selected.price, 6) : "—"}</span>
+              <span>{selected ? formatPrice(selected.price) : "—"}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">最大亏损</span>

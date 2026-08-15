@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useAccount } from "wagmi";
 import type { Position, Quote, Side } from "@/lib/types";
-import { formatAmount, toNumberString } from "@/lib/format";
+import { formatAmount, formatPrice } from "@/lib/format";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useBalances } from "@/hooks/useBalances";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
@@ -125,7 +125,7 @@ export function ClosePanel({
           <div className="mt-3 rounded-lg bg-primary/5 p-3 text-sm space-y-1">
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">成交价</span>
-              <span>{toNumberString(selected.price, 6)} HKD/LLM</span>
+              <span>{formatPrice(selected.price)} HKD/LLM</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">付</span>

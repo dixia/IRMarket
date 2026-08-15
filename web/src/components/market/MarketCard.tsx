@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { BlockCountdown } from "./BlockCountdown";
-import { toNumberString } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
 import type { MarketWithMeta } from "@/lib/types";
 
 export function MarketCard({
@@ -31,7 +31,7 @@ export function MarketCard({
           <div>
             <div className="text-xs text-text-dim">当前价格 (HKD)</div>
             <div className="text-2xl font-bold text-primary">
-              {price !== undefined ? toNumberString(price, 6) : "—"}
+              {formatPrice(price)}
             </div>
           </div>
           <div className="text-right text-xs text-text-dim">

@@ -1,6 +1,6 @@
 "use client";
 
-import { formatAmount, formatPnl, toNumberString } from "@/lib/format";
+import { formatAmount, formatPnl, formatPrice } from "@/lib/format";
 import type { Position } from "@/lib/types";
 import { BlockCountdown } from "@/components/market/BlockCountdown";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
@@ -57,16 +57,12 @@ export function PositionCard({
           <div className="mt-3 space-y-1 text-sm">
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">开仓价</span>
-              <span>{toNumberString(position.openPrice, 6)}</span>
+              <span>{formatPrice(position.openPrice)}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">当前报价</span>
               <span>
-                {settling
-                  ? "终价结算中…"
-                  : price !== undefined
-                    ? toNumberString(price, 6)
-                    : "—"}
+                {settling ? "终价结算中…" : formatPrice(price)}
               </span>
             </div>
             <div className="flex justify-between gap-6">

@@ -3,19 +3,23 @@
 import { useAccount, useBalance, useConnect, useDisconnect } from "wagmi";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { useBalances } from "@/hooks/useBalances";
+import { useHydrated } from "@/hooks/useHydrated";
 import { CHAIN_ID } from "@/lib/config";
 
 const MON_RESERVE_FLOOR = 10n * 10n ** 18n;
 
 export function WalletButton() {
+  // Hydration-safe: renders the disconnected button until after hydration, so SSR HTML
+  // matches the client's first render even when wagmi rehydrates the connected account.
+  const mounted = useHydrated();
   const { address, chainId } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
-  const balances = useBalances(address);
-  const { data: mon } = useBalance({ address });
+  const balances = useBalances(mounted ? address : undefined);
+  const { data: mon } = useBalance({ address: mounted ? address : undefined });
   const lowMon = mon !== undefined && mon.value < MON_RESERVE_FLOOR;
 
-  if (!address) {
+  if (!mounted || !address) {
     return (
       <button
         className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-black hover:bg-primary-dim transition-colors"
