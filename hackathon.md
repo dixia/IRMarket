@@ -14,7 +14,7 @@ Many assets can't be shorted — investors can only go long, which rewards blind
 
 ### Solution
 
-IRMarket is a permissionless binary options market on Monad. Anyone can list a market on any priced asset — A-share stocks, Labubu, whatever. Pick call or put, invest HKD, get position units instantly. Payout is a linear spread PNL at expiry — no margin calls, no liquidation, max loss = principal. Default 3-minute expiry, reverse-close anytime. Settlement prices are enforced on-chain by collateral and permissionless arbitrage — no off-chain data feeds, no trusted validators.
+IRMarket is a permissionless binary options market on Monad. Anyone can list a market on any priced asset — A-share stocks, Labubu, whatever. Pick call or put, invest HKD, get position units instantly. Payout is a linear spread PNL at expiry — no margin calls, no liquidation, max loss = principal. Default 3-minute expiry, reverse-close anytime. The real-world barrier to using derivatives for price discovery is high — A-share options, for example, need tens of thousands of RMB per contract — IRMarket drops that to cents, so anyone can go long or short with a tiny amount. Settlement prices are enforced on-chain by collateral and permissionless arbitrage — no off-chain data feeds, no trusted validators.
 
 ### How It Works
 
@@ -50,7 +50,7 @@ Monad 上的免许可二元期权市场——可以做空 A 股、做空 Labubu�
 
 ### 解决方案
 
-IRMarket 是 Monad 上的免许可二元期权市场。任何人都可以为任意有价格的资产（A 股、Labubu 等）创建市场。选择看涨/看跌，投入 HKD 即得持仓份数，到期按线性差价 PNL 兑付——无追缴、无爆仓、最大亏损即本金。默认 3 分钟到期，到期前随时反向平仓。结算价由链上抵押品与免许可套利保证——无链下数据源、无需信任验证节点。
+IRMarket 是 Monad 上的免许可二元期权市场。任何人都可以为任意有价格的资产（A 股、Labubu 等）创建市场。选择看涨/看跌，投入 HKD 即得持仓份数，到期按线性差价 PNL 兑付——无追缴、无爆仓、最大亏损即本金。默认 3 分钟到期，到期前随时反向平仓。现实中用衍生品参与价格发现的门槛很高——比如 A 股期权一张合约动辄十万元本金——IRMarket 把这个门槛降到几分钱，小额即可做多/做空。结算价由链上抵押品与免许可套利保证——无链下数据源、无需信任验证节点。
 
 ### 运行原理
 
