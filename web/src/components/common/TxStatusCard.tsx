@@ -9,22 +9,34 @@ export type TxState =
   | { status: "success"; hash: `0x${string}`; title?: string; detail?: ReactNode }
   | { status: "error"; message: string };
 
-/** Friendly mapping for MonoracleWindowed + wrapper errors (sc-tech-spec §3.7). */
+/** Friendly mapping for IRMarket + MonoracleWindowed errors (sc-tech-spec §3.7 / web-tech-design §9). */
 export function mapTransactionError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   const map: Array<[RegExp, string]> = [
+    // MonoracleWindowed fork errors
     [/VerificationWindowExpired|QuoteWindowExpired/, "报价已过窗口，请选择最新报价"],
-    [/VerificationWindowActive/, "报价窗口尚未结束"],
-    [/QuoteNotActive/, "报价已失效（已被否决或结算），请选择最新报价"],
+    [/VerificationWindowActive/, "报价窗口尚未结束，无法否决"],
     [/QuoteDoesNotExist/, "报价不存在，请刷新后重试"],
-    [/MarketDoesNotExist/, "市场不存在"],
+    [/QuoteNotActive/, "报价已失效（已被否决或结算），请选择最新报价"],
+    [/QuoteAmountTooSmall/, "报价金额过小"],
+    [/ZeroBaseAmount/, "报价资产金额为 0"],
     [/ExpiryMustBeFuture/, "到期时间必须晚于当前区块"],
-    [/InsufficientAllowance|ERC20: insufficient allowance|transfer amount exceeds allowance/, "余额授权不足，请先授权"],
-    [/user rejected|User rejected|ACTION_REJECTED/, "已取消签名"],
-    [/insufficient funds|execution reverted due to insufficient balance/, "资产余额不足"],
-    [/SafeERC20FailedOperation/, "代币转账失败，请检查余额与授权"],
-    [/The transaction has been reverted|reverted/, "交易被拒绝，请检查报价窗口与授权"],
-    [/Nonce too low|nonce too low/, "Nonce 冲突，请重试"],
+    [/NotQuoteProvider/, "仅报价者可执行该操作"],
+    [/NotWithdrawable/, "抵押暂不可提取"],
+    // IRMarket wrapper errors
+    [/MarketDoesNotExist/, "市场不存在，请刷新后重试"],
+    [/QuotePairMismatch/, "报价与本市场资产不匹配，请选择最新报价"],
+    [/FeeTooHigh/, "手续费费率异常"],
+    [/InvalidToken/, "代币地址无效"],
+    [/IdenticalTokens/, "基础与报价代币不能相同"],
+    // OpenZeppelin / revert-data errors
+    [/ERC20InsufficientAllowance|InsufficientAllowance|transfer amount exceeds allowance/, "余额授权不足，请先授权"],
+    [/ERC20InsufficientBalance|InsufficientBalance|insufficient funds|execution reverted due to insufficient balance/, "资产余额不足"],
+    [/SafeERC20FailedOperation|transfer from failed|transfer failed/, "代币转账失败，请检查余额与授权"],
+    [/ReentrancyGuardReentrantCall/, "交易冲突，请重试"],
+    [/user rejected|User rejected|ACTION_REJECTED|MetaMask Message Signature|declined/, "已取消签名"],
+    [/Nonce too low|nonce too low|nonce has already been used/, "Nonce 冲突，请重试"],
+    [/The transaction has been reverted|reverted|estimateGas|execution reverted/, "交易被拒绝，请检查报价窗口与授权"],
   ];
   for (const [re, friendly] of map) {
     if (re.test(msg)) return friendly;

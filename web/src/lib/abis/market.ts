@@ -78,7 +78,7 @@ export const IRMARKET_ABI = [
       { name: "quoteId", type: "uint256", indexed: true },
       { name: "marketId", type: "uint256", indexed: true },
       { name: "trader", type: "address", indexed: true },
-      { name: "side", type: "uint8", indexed: true },
+      { name: "side", type: "uint8", indexed: false },
       { name: "swapIn", type: "uint256", indexed: false },
       { name: "swapOut", type: "uint256", indexed: false },
       { name: "fee", type: "uint256", indexed: false },

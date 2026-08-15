@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { Logo } from "@/components/common/Logo";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import { NetworkBadge } from "@/components/wallet/NetworkBadge";
+import { FaucetModal } from "@/components/faucet/FaucetModal";
 
 const NAV = [
   { href: "/", label: "市场" },
@@ -13,6 +15,7 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [faucetOpen, setFaucetOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -37,13 +40,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               })}
             </nav>
           </div>
-          <WalletButton />
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-lg border border-primary/40 px-3 py-2 text-sm text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => setFaucetOpen(true)}
+            >
+              领取测试币
+            </button>
+            <WalletButton />
+          </div>
         </div>
       </header>
 
       <NetworkBadgeContainer />
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+
+      <FaucetModal open={faucetOpen} onClose={() => setFaucetOpen(false)} />
     </div>
   );
 }

@@ -24,11 +24,13 @@ export function computePositionValuation(p: Position, price: bigint | undefined)
 export function PositionCard({
   position,
   price,
+  settling,
   onClose,
   canClose,
 }: {
   position: Position;
   price?: bigint;
+  settling?: boolean;
   onClose: (p: Position) => void;
   canClose: boolean;
 }) {
@@ -59,10 +61,16 @@ export function PositionCard({
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">当前报价</span>
-              <span>{price !== undefined ? toNumberString(price, 6) : "—"}</span>
+              <span>
+                {settling
+                  ? "终价结算中…"
+                  : price !== undefined
+                    ? toNumberString(price, 6)
+                    : "—"}
+              </span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">持仓市值</span>
+              <span className="text-text-dim">{expired ? "最终市值" : "持仓市值"}</span>
               <span>
                 {position.side === "bull"
                   ? `${formatAmount(position.heldBase, 18, 4)} LLM`
@@ -70,9 +78,9 @@ export function PositionCard({
               </span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">浮动盈亏</span>
+              <span className="text-text-dim">{expired ? "最终盈亏" : "浮动盈亏"}</span>
               <span className={pnl !== undefined && pnl >= 0n ? "text-bull" : "text-bear"}>
-                {formatPnl(pnl)}
+                {settling ? "结算中…" : formatPnl(pnl)}
               </span>
             </div>
             <div className="flex justify-between gap-6">
@@ -84,7 +92,7 @@ export function PositionCard({
         <div className="shrink-0">
           {expired ? (
             <span className="rounded-md bg-primary/15 px-2 py-1 text-xs font-semibold text-primary">
-              已到期
+              已结算
             </span>
           ) : (
             canClose && (
@@ -100,7 +108,7 @@ export function PositionCard({
       </div>
       {expired && (
         <p className="mt-3 text-xs text-text-dim">
-          最终盈亏以终价标记；资产已在你的钱包，可反向平仓变现或继续持有。
+          最终盈亏以终价标记；资产已在你的钱包，可反向平仓变现或继续持有。无需结算/领取。
         </p>
       )}
     </div>

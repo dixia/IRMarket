@@ -40,17 +40,21 @@ export function TradePanel({
   quoteToken,
   marketId,
   feeBps,
+  initialSide,
 }: {
   baseToken: `0x${string}` | undefined;
   quoteToken: `0x${string}` | undefined;
   marketId: bigint;
   feeBps: bigint;
+  initialSide?: Side;
 }) {
   const { address } = useAccount();
   const { activeQuotes } = useQuotes(baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null);
   const blockNumber = useCurrentBlock();
   const balances = useBalances(address);
-  const [side, setSide] = useState<Side>("bull");
+  // null until the user picks a tab; then it locks in (route side only pre-selects).
+  const [manualSide, setManualSide] = useState<Side | null>(null);
+  const side: Side = manualSide ?? initialSide ?? "bull";
 
   const active = activeQuotes.filter((q) => blockNumber === undefined || q.expiryBlock >= blockNumber);
   const selected: Quote | undefined = active.length > 0 ? active[active.length - 1] : undefined;
@@ -163,7 +167,7 @@ export function TradePanel({
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
                 side === "bull" ? "bg-primary text-black" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
               }`}
-              onClick={() => setSide("bull")}
+              onClick={() => setManualSide("bull")}
             >
               看涨（做多）
             </button>
@@ -171,7 +175,7 @@ export function TradePanel({
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
                 side === "bear" ? "bg-primary text-black" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
               }`}
-              onClick={() => setSide("bear")}
+              onClick={() => setManualSide("bear")}
             >
               看跌（做空）
             </button>
@@ -188,7 +192,7 @@ export function TradePanel({
               <span>{preview ? formatAmount(preview.receiveAmount, 18, 4) : "—"} {preview?.receiveLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">手续费 (1%)</span>
+              <span className="text-text-dim">手续费 ({Number(feeBps) / 100}%)</span>
               <span>{preview ? formatAmount(preview.fee, 18, 4) : "—"} HKD</span>
             </div>
             <div className="flex justify-between gap-6">

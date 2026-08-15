@@ -48,6 +48,7 @@ export interface Position {
 export type PriceState =
   | { status: "loading" }
   | { status: "missing"; exists: false }
+  | { status: "settling"; exists: false }
   | { status: "ok"; price: bigint; settledSlot: number; exists: true };
 
 export interface MarketWithMeta extends Market {

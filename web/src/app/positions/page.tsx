@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { useMarkets } from "@/hooks/useMarkets";
 import { usePositions } from "@/hooks/usePositions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { PositionCard, computePositionValuation } from "@/components/position/PositionCard";
+import { ClosePanel } from "@/components/position/ClosePanel";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { isFullyConfigured } from "@/lib/config";
-import { Position } from "@/lib/types";
+import type { Position } from "@/lib/types";
 
 export default function PositionsPage() {
   const { address } = useAccount();
@@ -26,16 +27,23 @@ export default function PositionsPage() {
   const blockNumber = useCurrentBlock();
   const { activeQuotes } = useQuotes(pair);
 
+  const [tab, setTab] = useState<"open" | "settled">("open");
+  const [closing, setClosing] = useState<Position | null>(null);
+
   const mark = priceState.status === "ok" ? priceState.price : undefined;
+  const settling = priceState.status === "settling";
 
-  const canClose = (p: Position) => {
-    if (blockNumber === undefined) return false;
-    if (p.expiryBlock < blockNumber) return false;
-    // need a live ACTIVE quote to reverse-veto against
-    return activeQuotes.some((q) => q.expiryBlock >= blockNumber);
-  };
+  const isExpired = (p: Position) => blockNumber !== undefined && p.expiryBlock < blockNumber;
 
-  const totalPnl = positions.reduce((sum, p) => {
+  const openPositions = positions.filter((p) => !isExpired(p));
+  const settledPositions = positions.filter((p) => isExpired(p));
+
+  const visible = tab === "open" ? openPositions : settledPositions;
+
+  const canClose = (p: Position) =>
+    !isExpired(p) && activeQuotes.some((q) => q.expiryBlock >= (blockNumber ?? 0n));
+
+  const totalPnl = openPositions.reduce((sum, p) => {
     const v = computePositionValuation(p, mark);
     return sum + (v.pnl ?? 0n);
   }, 0n);
@@ -59,7 +67,7 @@ export default function PositionsPage() {
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <div className="text-xs text-text-dim">总浮动盈亏</div>
+            <div className="text-xs text-text-dim">进行中浮动盈亏</div>
             <div className={`text-lg font-bold ${totalPnl >= 0n ? "text-bull" : "text-bear"}`}>
               {totalPnl >= 0n ? "+" : ""}
               {(Number(totalPnl) / 10 ** 18).toFixed(2)} HKD
@@ -83,25 +91,78 @@ export default function PositionsPage() {
           <p className="text-sm text-text-dim">还没有持仓。—— 前往市场页开一单看涨或看跌试试。</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {positions.map((p) => (
-            <PositionCard
-              key={p.id}
-              position={p}
-              price={mark}
-              canClose={canClose(p)}
-              onClose={(pos) => {
-                // reverse-veto close handled on the market page (query param side select)
-                window.location.href = `/market?id=${pos.marketId?.toString() ?? "1"}`;
-              }}
+        <>
+          {/* tabs: 进行中 / 已结算 */}
+          <div className="flex gap-2">
+            <TabButton active={tab === "open"} onClick={() => setTab("open")}>
+              进行中 ({openPositions.length})
+            </TabButton>
+            <TabButton active={tab === "settled"} onClick={() => setTab("settled")}>
+              已结算 ({settledPositions.length})
+            </TabButton>
+          </div>
+
+          {closing && (
+            <ClosePanel
+              position={closing}
+              baseToken={market?.baseToken}
+              quoteToken={market?.quoteToken}
+              onClosed={() => setClosing(null)}
             />
-          ))}
-        </div>
+          )}
+
+          {settling && tab === "open" && (
+            <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+              终价结算中（等待 settle）—— bot 正在结算最终报价，稍后显示终价。
+            </p>
+          )}
+
+          {visible.length === 0 ? (
+            <p className="text-sm text-text-dim">
+              {tab === "open" ? "没有进行中的持仓。" : "没有已结算的持仓。"}
+            </p>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {visible.map((p) => (
+                <PositionCard
+                  key={p.id}
+                  position={p}
+                  price={mark}
+                  settling={settling}
+                  canClose={canClose(p)}
+                  onClose={(pos) => setClosing(pos)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <p className="text-xs text-text-dim">
-        说明：持仓由链上事件实时派生的，无需再领取（无中央账本）。反向平仓 = 使用当前 bot 报价买入相反方向。
+        说明：持仓由链上事件实时派生的，无需再领取（无中央账本）。反向平仓 = 使用当前 bot 报价买入相反方向，
+        直接否决、无手续费；看跌平仓需补足与开仓手续费的差额。
       </p>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+        active ? "bg-primary text-black" : "bg-card text-text-dim hover:text-text"
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }

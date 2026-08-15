@@ -75,6 +75,12 @@ export default function HomePage() {
         )}
       </section>
 
+      {price.status === "settling" && (
+        <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+          终价结算中（等待 settle）—— bot 正在结算最终报价。
+        </p>
+      )}
+
       {(!isFullyConfigured && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
           合约地址尚未配置（缺 NEXT_PUBLIC_ORACLE_ADDRESS / BASE_TOKEN / QUOTE_TOKEN）。配置后即可显示实时报价与交易入口。

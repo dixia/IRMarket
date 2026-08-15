@@ -1,14 +1,19 @@
 "use client";
 
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useBalance, useConnect, useDisconnect } from "wagmi";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { useBalances } from "@/hooks/useBalances";
+import { CHAIN_ID } from "@/lib/config";
+
+const MON_RESERVE_FLOOR = 10n * 10n ** 18n;
 
 export function WalletButton() {
   const { address, chainId } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const balances = useBalances(address);
+  const { data: mon } = useBalance({ address });
+  const lowMon = mon !== undefined && mon.value < MON_RESERVE_FLOOR;
 
   if (!address) {
     return (
@@ -24,13 +29,16 @@ export function WalletButton() {
     );
   }
 
-  const chainTag = chainId === 10143 ? "Monad Testnet" : `Chain ${chainId}`;
+  const chainTag = chainId === CHAIN_ID ? "Monad Testnet" : `Chain ${chainId}`;
 
   return (
     <div className="flex items-center gap-2">
       <div className="hidden sm:flex flex-col items-end text-xs leading-tight">
-        <span className="text-text-dim">HKD</span>
-        <span className="text-primary font-semibold">{formatAmount(balances.hkd, 18, 2)}</span>
+        <span className="text-text-dim">HKD {formatAmount(balances.hkd, 18, 2)}</span>
+        <span className="text-text-dim">LLM {formatAmount(balances.llm, 18, 2)}</span>
+        <span className={lowMon ? "text-bear" : "text-text-dim"}>
+          MON {formatAmount(mon?.value, 18, 2)}
+        </span>
       </div>
       <span className="rounded-full bg-card border border-card-border px-2 py-1 text-[11px] text-text-dim">
         {chainTag}

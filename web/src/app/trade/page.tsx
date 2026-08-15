@@ -10,22 +10,23 @@ import { BlockCountdown } from "@/components/market/BlockCountdown";
 import { toNumberString } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
 
-export default function MarketDetailPage() {
+export default function TradePage() {
   return (
     <Suspense fallback={<p className="text-sm text-text-dim">加载市场…</p>}>
-      <MarketDetailContent />
+      <TradeContent />
     </Suspense>
   );
 }
 
-function MarketDetailContent() {
+function TradeContent() {
   const params = useSearchParams();
-  const id = Number(params.get("id") ?? "1");
+  const m = Number(params.get("m") ?? "1");
+  const side = params.get("side");
   const markets = useMarkets();
 
   const market = useMemo(
-    () => markets.find((m) => Number(m.marketId) === id) ?? markets[0],
-    [markets, id],
+    () => markets.find((item) => Number(item.marketId) === m) ?? markets[0],
+    [markets, m],
   );
 
   const price = useReferencePrice(
@@ -54,12 +55,28 @@ function MarketDetailContent() {
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Stat label="当前价格" value={price.status === "ok" ? `${toNumberString(price.price, 6)} HKD` : "—"} accent />
+          <Stat
+            label="当前价格"
+            value={
+              price.status === "ok"
+                ? `${toNumberString(price.price, 6)} HKD`
+                : price.status === "settling"
+                  ? "结算中"
+                  : "—"
+            }
+            accent
+          />
           <Stat label="市场状态" value="Ongoing" />
           <Stat label="报价方式" value="Bot 报价" />
-          <Stat label="手续费" value="1% (仅开仓)" />
+          <Stat label="手续费" value={`${Number(market.feeBps) / 100}% (仅开仓)`} />
         </div>
       </section>
+
+      {price.status === "settling" && (
+        <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+          终价结算中（等待 settle）—— 最终报价尚未结算，当前报价为上一轮数值，请稍候。
+        </p>
+      )}
 
       {/* market card snapshot */}
       <MarketCard market={market} price={price.status === "ok" ? price.price : undefined} />
@@ -70,6 +87,7 @@ function MarketDetailContent() {
         quoteToken={isFullyConfigured ? market.quoteToken : undefined}
         marketId={market.marketId}
         feeBps={market.feeBps}
+        initialSide={side === "short" ? "bear" : side === "long" ? "bull" : undefined}
       />
 
       {/* how it works */}
