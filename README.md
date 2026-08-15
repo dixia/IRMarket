@@ -22,6 +22,9 @@ No off-chain data feeds, no validators.
 - **Close & settle:** early reverse close anytime against the provider pool; at expiry the
   bot auto-settles. Payout is a **linear spread PNL** — call: `(settle − open) × units`,
   put inverted — capped at principal.
+- **Low barrier:** real derivative markets are gated by high minimums — A-share options, for
+  example, need tens of thousands of RMB per contract. IRMarket drops that to cents, so anyone
+  can use long/short derivatives for price discovery with a tiny amount.
 
 ## Getting Started
 
@@ -118,6 +121,8 @@ IRMarket/
 - **到期**：默认 **3 分钟**（≈600 blocks），UI 可选其它期限。无爆仓、无保证金追缴，最大亏损即本金。
 - **平仓与结算**：到期前可随时反向平仓（对手方 = provider 资金池）；到期由 bot 自动结算。
   盈亏为**线性差价 PNL**——看涨 `(结算价 − 开仓价) × 份数`，看跌相反，封顶本金。
+- **低门槛**：现实衍生品市场门槛极高——比如 A 股期权一张合约动辄十万元本金；IRMarket 把这个门槛
+  降到几分钱，小额即可用做多/做空衍生品参与价格发现。
 
 ## 快速开始
 
