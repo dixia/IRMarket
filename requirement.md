@@ -142,5 +142,6 @@
 
 - Settlement relies on the existing Monoracle veto-arbitrage primitive for any priced asset.
 - **Monoracle testnet contract (10143):** `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0`
-- Monoracle source is vendored at `contracts/Monoracle.sol` and **kept in sync** with the
-  reference repo (`github.com/dixia/monoracle`).
+- Monoracle contract source is **not vendored** — referenced from the upstream repo
+  (`github.com/dixia/monoracle`, `contracts/Monoracle.sol`). Only the ABI is copied here
+  (`abi/Monoracle.abi.json`).

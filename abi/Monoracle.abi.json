@@ -1,0 +1,518 @@
+[
+  {
+    "name": "IdenticalTokens",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "InvalidToken",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "NotQuoteProvider",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "NotWithdrawable",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "QuoteAmountTooSmall",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "QuoteDoesNotExist",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "QuoteNotActive",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "ReentrancyGuardReentrantCall",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "SafeERC20FailedOperation",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "VerificationWindowActive",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "VerificationWindowExpired",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "ZeroBaseAmount",
+    "type": "error",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [],
+    "outputs": null,
+    "anonymous": null
+  },
+  {
+    "name": "FundsWithdrawn",
+    "type": "event",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "provider",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "baseAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "quoteAmount",
+        "type": "uint256"
+      }
+    ],
+    "outputs": null,
+    "anonymous": false
+  },
+  {
+    "name": "QuoteSettledValid",
+    "type": "event",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      }
+    ],
+    "outputs": null,
+    "anonymous": false
+  },
+  {
+    "name": "QuoteSubmitted",
+    "type": "event",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "provider",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "baseToken",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "quoteToken",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "baseAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "quoteAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "startSlot",
+        "type": "uint32"
+      }
+    ],
+    "outputs": null,
+    "anonymous": false
+  },
+  {
+    "name": "QuoteVetoedOverpriced",
+    "type": "event",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      }
+    ],
+    "outputs": null,
+    "anonymous": false
+  },
+  {
+    "name": "QuoteVetoedUnderpriced",
+    "type": "event",
+    "stateMutability": null,
+    "constant": null,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      }
+    ],
+    "outputs": null,
+    "anonymous": false
+  },
+  {
+    "name": "VERIFICATION_SLOTS",
+    "type": "function",
+    "stateMutability": "view",
+    "constant": null,
+    "inputs": [],
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "getLatestPrice",
+    "type": "function",
+    "stateMutability": "view",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "baseToken",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "quoteToken",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint32",
+        "name": "settledSlot",
+        "type": "uint32"
+      },
+      {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "latestValidQuoteId",
+    "type": "function",
+    "stateMutability": "view",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "nextQuoteId",
+    "type": "function",
+    "stateMutability": "view",
+    "constant": null,
+    "inputs": [],
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "quotes",
+    "type": "function",
+    "stateMutability": "view",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "provider",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "baseToken",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "quoteToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "baseAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "quoteAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint32",
+        "name": "startSlot",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "settledSlot",
+        "type": "uint32"
+      },
+      {
+        "internalType": "enum Monoracle.QuoteStatus",
+        "name": "status",
+        "type": "uint8"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "settleValidQuote",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [],
+    "anonymous": null
+  },
+  {
+    "name": "submitQuote",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "baseToken",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "quoteToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "baseAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "quoteAmount",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": null
+  },
+  {
+    "name": "vetoOverpriced",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [],
+    "anonymous": null
+  },
+  {
+    "name": "vetoUnderpriced",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [],
+    "anonymous": null
+  },
+  {
+    "name": "withdrawProviderFunds",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "constant": null,
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "quoteId",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [],
+    "anonymous": null
+  }
+]

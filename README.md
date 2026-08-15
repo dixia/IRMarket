@@ -52,22 +52,25 @@ npx next dev -p 3000
 | Monad Testnet | 10143 | `https://testnet-rpc.monad.xyz` |
 | Monad Mainnet | 143 | `https://rpc.monad.xyz` |
 
-## Monoracle dependency (vendored)
+## Monoracle dependency (referenced)
 
-IRMarket builds on the **Monoracle** veto-arbitrage primitive. Its source is vendored at
-`contracts/Monoracle.sol` and kept in sync with the reference project
-(`github.com/dixia/monoracle`).
+IRMarket builds on the **Monoracle** veto-arbitrage primitive. The contract source is **not
+vendored** into this repo — it is referenced from the upstream project
+(`github.com/dixia/monoracle`). Only the Monoracle ABI is copied here (`abi/Monoracle.abi.json`)
+so the frontend and bot can interface with the deployed settlement oracle.
 
+- **Monoracle source (upstream):** `github.com/dixia/monoracle` → `contracts/Monoracle.sol`
 - **Monoracle settlement contract (Monad testnet):** `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0`
-- To sync: copy `monoracle/contracts/Monoracle.sol` into `contracts/`.
+- To refresh the ABI: copy from `monoracle/artifacts/contracts/Monoracle.sol/Monoracle.json`
+  into `abi/Monoracle.abi.json`.
 
 ## Project Structure
 
 ```
 IRMarket/
 ├── contracts/          # Solidity contracts (option market + mocks)
-│   ├── IRMarket.sol    # Exotic option market (WIP)
-│   └── Monoracle.sol   # Vendored veto-arbitrage primitive (settlement oracle)
+│   └── IRMarket.sol    # Exotic option market (WIP)
+├── abi/                # Interface ABIs (Monoracle referenced upstream, ABI only)
 ├── test/               # Hardhat test suite
 ├── script/             # Deploy / demo / test scripts
 ├── bot/                # Python verification/settlement bot

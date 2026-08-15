@@ -109,11 +109,13 @@ All EOAs must maintain at least **10 MON** reserve balance.
 
 ---
 
-## 13. Reference: Monoracle Primitive (vendored)
+## 13. Reference: Monoracle Primitive (upstream)
 
-- **Source:** `contracts/Monoracle.sol` — vendored (copied) from the reference Monoracle
-  project, **kept in sync** with the upstream `monoracle/contracts/Monoracle.sol` (see
-  `github.com/dixia/monoracle`). When monoracle upstream changes, re-copy the file into this repo.
+- **Source:** NOT vendored — referenced from the upstream Monoracle project
+  `github.com/dixia/monoracle` (`contracts/Monoracle.sol`). IRMarket keeps only the ABI at
+  `abi/Monoracle.abi.json` (refresh from `monoracle/artifacts/.../Monoracle.json` when upstream changes).
+- **Interface:** `abi/Monoracle.abi.json` — `submitQuote`, `settleValidQuote`,
+  `vetoOverpriced`, `vetoUnderpriced`, `withdrawProviderFunds`, `getLatestPrice`, events.
 - **Live testnet deployment (settlement oracle):** Monad testnet (10143)
   `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0`
 - **Reference repo:** `github.com/dixia/monoracle` — the Monoracle tech-spec is the reference
