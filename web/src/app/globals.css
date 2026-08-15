@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --color-monad-purple: #836EF9;
+  --color-monad-purple-light: #9E8AFA;
+  --color-monad-purple-dark: #6B54D6;
+  --color-monad-blue: #200052;
+  --color-monad-black: #0E100F;
+  --color-monad-offwhite: #FBFAF9;
+  --color-monad-berry: #A0055D;
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+code, .font-mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.bg-monad-dot {
+  background-image: radial-gradient(rgba(131, 110, 249, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}

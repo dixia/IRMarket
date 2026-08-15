@@ -1,0 +1,37 @@
+# Remix compiler artifacts
+**/artifacts/
+**/artifacts/**
+
+# Remix plugin state folders
+deps/
+states/
+
+# Debug info
+*.dbg.json
+*.tsbuildinfo
+
+# Optional
+.env
+.env.local
+note.txt
+.mojo-agent.json
+/.agents/skills
+/.claude
+/.playwright-mcp
+cache/compile-cache.json
+/node_modules
+deployment.json
+.next/
+bot/.env
+bot/.venv/
+__pycache__/
+web/.vercel/
+web/test-results/
+
+dev_error.txt
+dev_output.txt
+product/GTM.md
+
+# DeltaV startup form snapshot + API key (do not commit)
+docs/startup-form.md
+docs/DELTAV_API_KEY.md
