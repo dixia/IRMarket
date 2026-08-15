@@ -6,15 +6,15 @@
 
 ### One-Liner
 
-Trade call/put options on anything with a price (A-share stocks, Labubu, ...) on Monad — settled by an on-chain veto-arbitrage oracle, no off-chain feeds, no liquidation.
+A permissionless binary options market on Monad — short A-shares, short Labubu, short anything with a price. No off-chain oracles, no liquidation, max loss = principal.
 
 ### Problem
 
-Long-tail assets (stocks, collectibles like Labubu) have prices, but there is no on-chain market that lets casual users make a simple directional bet without understanding complex derivatives or trusting a centralized oracle. Off-chain price feeds are not permissionless, and settlement prices can be gamed.
+Many assets can't be shorted — investors can only go long, which rewards blind optimism and punishes rational judgment. Bubbles inflate and price discovery breaks down; shorting is what keeps price discovery honest. Off-chain price feeds aren't permissionless, and centralized settlement can be gamed.
 
 ### Solution
 
-IRMarket is an on-chain European-style option market: pick call/put, invest HKD, get position units, and earn a linear spread PNL at expiry. No margin calls, max loss = principal. Settlement prices come from the Monoracle veto-arbitrage primitive: a provider posts quotes with bilateral collateral, anyone can permissionlessly arbitrage mispriced quotes within a ~600ms verification window, and surviving quotes become the canonical price. Price integrity is enforced by collateral and arbitrage, not by validators or data feeds.
+IRMarket is a permissionless binary options market on Monad. Anyone can list a market on any priced asset — A-share stocks, Labubu, whatever. Pick call or put, invest HKD, get position units instantly. Payout is a linear spread PNL at expiry — no margin calls, no liquidation, max loss = principal. Default 3-minute expiry, reverse-close anytime. Settlement prices are enforced on-chain by collateral and permissionless arbitrage — no off-chain data feeds, no trusted validators.
 
 ### How It Works
 
@@ -42,15 +42,15 @@ IRMarket is an on-chain European-style option market: pick call/put, invest HKD,
 
 ### 一句话简介
 
-在 Monad 上，任何有价格的资产（A 股、Labubu 等）都能交易看涨/看跌期权——结算价由链上否决-套利预言机保证，无链下数据源、无爆仓。
+Monad 上的免许可二元期权市场——可以做空 A 股、做空 Labubu、做空任何有价格的资产。无链下预言机、无爆仓、最大亏损即本金。
 
 ### 问题
 
-长尾资产（股票、潮玩 Labubu 等）都有价格，却没有让普通用户做简单方向判断的链上市场：要么不懂复杂衍生品，要么被迫信任中心化预言机。链下价格源不可免许可，结算价也可能被操纵。
+许多资产无法做空 —— 投资者只能做多，市场只奖励盲目乐观、惩罚理性判断，泡沫越吹越大，价格发现失灵。做空让价格发现回归有效。链下价格源不免许可，中心化结算也可能被操纵。
 
 ### 解决方案
 
-IRMarket 是链上欧式期权市场：选择看涨/看跌，投入 HKD 即得持仓份数，到期按线性差价 PNL 兑付,无追缴、最大亏损即本金。结算价来自 Monoracle 否决-套利原语：provider 以双边抵押提交报价，验证窗口（约 600ms）内任何人都可以免许可否决套利错误报价，未被否决者成为 canonical 价格。价格可信度由抵押品和套利约束，而非验证者或数据源。
+IRMarket 是 Monad 上的免许可二元期权市场。任何人都可以为任意有价格的资产（A 股、Labubu 等）创建市场。选择看涨/看跌，投入 HKD 即得持仓份数，到期按线性差价 PNL 兑付——无追缴、无爆仓、最大亏损即本金。默认 3 分钟到期，到期前随时反向平仓。结算价由链上抵押品与免许可套利保证——无链下数据源、无需信任验证节点。
 
 ### 运行原理
 
@@ -74,4 +74,4 @@ IRMarket 是链上欧式期权市场：选择看涨/看跌，投入 HKD 即得�
 
 ### Demo Frontend
 
-https://irmarket-g6pflvq3o-h-fbf5.vercel.app
+https://irmarket-h-fbf5.vercel.app
