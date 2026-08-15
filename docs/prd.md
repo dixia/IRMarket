@@ -116,7 +116,7 @@ IRMarket 是部署在 Monad 区块链上的 **链上奇异期权市场**，支�
 
 ### 2.4 结算规则
 
-- **触发条件**：期权到期后自动结算（✅ **决策 D-04**）。看涨/看跌用户仓位的盈利**由系统自动结算**（bot 免许可触发，仿 Monoracle settle 机制），**UI 实时展示浮盈**，可一键领取到账；结算价取结算tx执行时 `getLatestPrice` 的**最新 Monoracle 报价**
+- **触发条件**：期权到期后自动结算（✅ **决策 D-04**）。看涨/看跌用户仓位的盈利**由系统自动结算**（bot 免许可触发，仿 Monoracle settle 机制），**UI 实时展示浮盈**，可一键领取到账；**结算价 = 到期时 bot 新报的一笔最终报价并结算**（✅ D-06，经合约源码验证可行：`submitQuote` → 2-slot 窗口后 `settleValidQuote` → `getLatestPrice` 即为该最新价）
 - **价格依据**：⚠️ 修正——Monoracle **没有"到期日最终有效报价"这一概念**，每个报价只对应一个验证窗口。IRMarket 结算价 = **结算交易执行时** 调 `getLatestPrice(base=LLM, quote=HKD)` 读取的最新 canonical 有效价（由 Monoracle 否决仲裁保证其真实性，🔁 已实现）
 - **盈亏判定**（✅ 决策 D-02：**线性差价 PNL**，以 Monoracle 参考价差计算；用户确认"核心是算 PNL"，模型形状不纠结）：
   - 看涨：`盈亏 = (结算价 − 开仓参考价) × 持仓份数`；结算价 > 开仓价 → 盈利，反之亏损
@@ -297,7 +297,7 @@ IRMarket 是部署在 Monad 区块链上的 **链上奇异期权市场**，支�
 
 ## 八、决策与卡点记录（用户已确认 / 待细化）
 
-> **状态**：全部原 ❓/🚧 已由用户于 V0.6 评审确认（✅ D-01 ~ D-05）。下方仅保留实现层面的细化说明。
+> **状态**：全部原 ❓/🚧 已由用户于 V0.6 评审确认（✅ D-01 ~ D-06）。下方仅保留实现层面的细化说明。
 
 ### ✅ D-01 期权期限
 - Demo 默认 **3 分钟**（≈600 blocks）；**UI 期限选择器需提供其它期限选项**（3min / 5min / 1h / 1d / 1month），默认选中 3min。合约支持多期限，Demo 主要走 3min 链路。
@@ -317,12 +317,13 @@ IRMarket 是部署在 Monad 区块链上的 **链上奇异期权市场**，支�
 ### ✅ D-04 到期结算触发
 - **自动结算**：到期后由 bot（任何人均可免许可触发，仿 Monoracle settle）自动为看涨/看跌仓位结算盈利。
 - **UI 只负责展示与领取**：展示最新 Monoracle 报价下的浮盈/最终盈亏，用户一键领取到账。
-- 落地注意：自动结算的 gas 承担与奖励（小额返还）需要在合约中定义，防止无人触发的资金僵死。
+- **结算价（D-06，已确认可行）**：到期时 bot 用报价脚本 **再报一笔最终价** 并结算——`submitQuote`（双边质押）→ 2-slot 窗口（≈600ms，Monad 300ms 出块、2-slot finality）→ `settleValidQuote` 成为 canonical → IRMarket 结算 tx 里读 `getLatestPrice` 即得最终结算价。
+- 落地注意：自动结算的 gas 承担与奖励（小额返还）需要在合约中定义，防止无人触发的资金僵死；`getLatestPrice` 只返回最新 settled 报价（无 quoteId 选择），demo 中 bot 为唯一 provider 故确定，多 provider 场景需另行冻结快照（远期）。
 
 ### ✅ D-05 报价频率
 - bot **持续报价**，频率以"**3 分钟 Demo 窗口内可完成一个完整流程周期**"为准（建市报价→窗口结算→用户开仓→平仓/到期→PNL 结算，≤ 3min 全部走完）。
 - 每轮报价经 2-slot 验证窗口（≈600ms）settle 后成为最新 canonical 价；连续报价维持参考价新鲜，平仓/结算可信。
-- 落地注意：报价 interval 需兼顾 gas（Monad 按 gas_limit 计费）与 3min 窗口；可在 `bot/` 内做成可配置参数。
+- 落地注意：报价 interval 为**可配参数**（`bot/.env`：`QUOTE_INTERVAL_SECONDS` / `QUOTE_INTERVAL_BLOCKS`），兼顾 gas（Monad 按 gas_limit 计费）与 3min 窗口。
 
 ### 细化项（非阻塞，随开发推进）
 - 🚧-04 资产链路：自铸 `HKD` / `LLM` MockERC20（`script/deploy-tokens.js`），ORACLE/测试币地址已在 `.env.example` pin。**建议**：自铸语义清晰的 HKD/LLM，而非复用 monoracle 占位测试币（待开发时确认即可）。

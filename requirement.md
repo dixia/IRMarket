@@ -48,15 +48,24 @@
 
 ### 3.3 Settlement via Monoracle Primitive
 
-(TODO)
+- **Settlement price = a fresh Monoracle quote that the bot submits and settles at expiry** (confirmed, D-06):
+  1. Around expiry, the quote bot (provider) calls `submitQuote(base, quote, baseAmount, quoteAmount)` at the tracked fair price.
+  2. The quote is `ACTIVE` for `VERIFICATION_SLOTS = 2` blocks (~600ms on Monad's 300ms block time).
+  3. After the window, `settleValidQuote` (permissionless) makes it the canonical price (`latestValidQuoteId[pair]`).
+  4. IRMarket reads `getLatestPrice(base, quote)` inside its settlement tx and computes option PNL.
+- **Why it works:** Monoracle's `getLatestPrice` always returns the most recently settled valid quote; a fresh settlement quote therefore *replaces* any stale price for the pair.
+- **Feasibility (confirmed against contract source):** all steps are existing Monoracle entry-points; the 2-slot window aligns with Monad 2-slot full finality (~600ms). No Monoracle changes required.
+- **Robustness caveat:** `getLatestPrice` returns the pair's latest settled quote, without quoteId selection. For the demo, the bot is the sole provider, so the final quote is deterministic; if arbitrary third parties may also quote in future, IRMarket may need to pin a quoteId or freeze the snapshot window (out of demo scope).
 
 ### 3.4 Payouts & Withdrawal
 
-(TODO)
+- Option PNL per decision D-02 (linear price difference, capped at principal, no margin calls).
+- On settlement: winning positions paid from the market's launch liquidity + provider collateral pool (D-03); losing positions forfeit locked principal to the pool. Provider/MM fees (1% spread) credited to the MM account at open/close.
 
 ### 3.5 Read Interface
 
-(TODO)
+- Live reference price & settlement price: `Monoracle.getLatestPrice(base, quote)` → `(price, settledSlot, exists)`.
+- If `exists == false` (no settled quote yet): frontend disables open/settle and prompts "wait for bot to establish a quote" (D-05).
 
 ---
 
@@ -78,7 +87,13 @@
 
 ## 5. Process / Data Flow Rules
 
-(TODO — valid price flow, veto flow, settlement flows)
+### Mainnet/Testnet price & settlement flow (confirmed)
+
+1. **Continuous quoting (D-05):** quote bot (provider) loop:
+   - Fetch fair price → `submitQuote` (bilateral collateral: base + quote ERC20), loop interval configurable (`QUOTE_INTERVAL_SECONDS` / `QUOTE_INTERVAL_BLOCKS`); tuned so a full demo cycle fits inside the 3-min window.
+   - Each quote: 2-slot ACTIVE window → bot settles own quote (`settleValidQuote`) → withdraws prior round's funds to recycle collateral.
+2. **Veto flow:** within a quote's 2-slot window, anyone with a better price reference may `vetoUnderpriced`/`vetoOverpriced`; vetoed quotes never become canonical.
+3. **Option lifecycle:** user opens (locks HKD, snapshots `getLatestPrice` as entry reference) → may early-close against the provider pool (D-03) → at expiry bot fires a **final settlement quote** and settles it → IRMarket reads `getLatestPrice` and auto-settles positions (D-04), UI shows PNL to claim.
 
 ---
 
@@ -145,3 +160,8 @@
 - Monoracle contract source is **not vendored** — referenced from the upstream repo
   (`github.com/dixia/monoracle`, `contracts/Monoracle.sol`). Only the ABI is copied here
   (`abi/Monoracle.abi.json`).
+- **Settlement design (D-06, confirmed feasible):** expiry settlement = bot submits a fresh
+  quote at the fair price, waits out the fixed 2-slot window (~600ms, matching Monad 2-slot
+  full finality), settles it (`settleValidQuote`), and IRMarket reads `getLatestPrice` for PNL.
+- **Quote cadence:** bot quoting loop interval is a **configurable parameter** (`bot/.env`),
+  tuned so a full demo cycle completes within the 3-min option window (D-05).
