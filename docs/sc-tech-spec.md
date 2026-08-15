@@ -30,7 +30,7 @@ contract that quotes and settles):
 | **Settlement** (asset swap, immediate) | 🔁 MonoracleWindowed | done inside the veto tx — no second step |
 | **Verification window = option expiry** | 🔁 MonoracleWindowed | per-quote `expiryBlock` (D-13) |
 | Canonical price / read | 🔁 MonoracleWindowed | `settleValidQuote` / `getLatestPrice` |
-| **Market factory (registry)** | IRMarket (thin) | `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` — **no pair dedup** (D-14) |
+| **Market factory (registry)** | IRMarket (thin) | `createMarket(base, quote, marketMaker, expiryBlock, feeBps)` — **no pair dedup** (D-14) |
 | **Fee wrapper (1%, in HKD)** | IRMarket (thin) | `openLong` / `openShort` = veto + explicit fee (D-11/D-16) |
 | Position index / valuation | IRMarket opt. + frontend | Monoracle events → local ledger; mark via ACTIVE quotes mid-round, `getLatestPrice` at expiry |
 
@@ -138,8 +138,9 @@ function createMarket(
   `feeBps < 10000`; `expiryBlock > block.number`.
 - **Effects:** create `Market`; `nextMarketId++`; **grant the oracle allowance** so the
   wrapper can veto with this pair's tokens:
-  `IERC20(baseToken).approve(oracle, type(uint256).max)` and same for `quoteToken`.
-- **Emission:** `MarketCreated(marketId, baseToken, quoteToken, marketMaker, expiryBlock, feeBps, msg.sender)`.
+  `IERC20(baseToken).forceApprove(oracle, type(uint256).max)` and same for `quoteToken`
+  (`forceApprove` rather than `approve` — safe for tokens that require zero-then-approve).
+- **Emission:** `MarketCreated(marketId, baseToken, quoteToken, marketMaker, expiryBlock, feeBps)`.
 - No tokens move in this call. `expiryBlock` is **advisory for the contract** (the wrapper has
   no settlement logic); it drives the bot's per-quote `expiryBlock` (D-13/D-06) and the UI
   countdown (D-01).
@@ -220,8 +221,13 @@ All key args `indexed` (Monad Streaming RPC):
 
 ```
 MarketCreated(marketId, baseToken, quoteToken, marketMaker, expiryBlock, feeBps)
-VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)      // side indexed
+VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)   // quoteId/marketId/trader indexed
 ```
+> Solidity caps non-anonymous events at **3 indexed args**; the wrapper indexes `quoteId`,
+> `marketId`, `trader` (wallet-scoped + quote-join + market feeds) and keeps `side`/amounts/
+> `fee` in `data`. The frontend ABI (`web/src/lib/abis/market.ts`) matches — `side` is
+> `indexed: false`.
+>
 > MonoracleWindowed's own events (`QuoteSubmitted` — now with `expiryBlock`,
 > `QuoteVetoedUnderpriced`, `QuoteVetoedOverpriced`, `QuoteSettledValid`, `FundsWithdrawn`)
 > are the trading ledger — IRMarket mirrors `trader`/`fee` attribution for the UI.
@@ -229,9 +235,10 @@ VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)      // side 
 ### 3.7 Errors (custom, gas-efficient on Monad)
 
 `MarketDoesNotExist`, `InvalidToken`, `IdenticalTokens`, `FeeTooHigh`, `ExpiryMustBeFuture`,
-`QuoteNotActive`, `QuoteWindowExpired` (pre-check), `NoValidPrice` (UI-side read guard),
-plus passthrough of oracle errors (`ExpiryMustBeFuture`, `VerificationWindowExpired`,
-`QuoteDoesNotExist`, `QuoteNotActive`, `ReentrancyGuardReentrantCall`, `SafeERC20FailedOperation`).
+`QuotePairMismatch` (pre-check), `QuoteNotActive` (pre-check), `QuoteWindowExpired`
+(pre-check), plus passthrough of oracle errors (`ExpiryMustBeFuture`,
+`VerificationWindowExpired`, `QuoteDoesNotExist`, `QuoteNotActive`,
+`ReentrancyGuardReentrantCall`, `SafeERC20FailedOperation`).
 
 ### 3.8 Interface to MonoracleWindowed (local `IMonoracleWindowed`)
 
