@@ -188,13 +188,15 @@ class MarketMakerBot:
                 if consecutive_strangers >= 20:
                     break
 
-    def _active_own_quote(self) -> Optional[int]:
-        """Our newest ACTIVE quote for this round, if any."""
+    def _active_own_quote(self, round_expiry: int) -> Optional[int]:
+        """Our newest ACTIVE quote for THIS round (expiryBlock == market expiry), if any."""
         active = None
         for qid in self._own_quotes:
             q = self._quote(qid)
             if q[1].lower() != self.base_token.lower() or q[2].lower() != self.quote_token.lower():
                 continue
+            if q[8] != round_expiry:
+                continue  # belongs to a different round
             if q[9] == ACTIVE:
                 active = qid if active is None or qid > active else active
         return active
@@ -210,15 +212,37 @@ class MarketMakerBot:
             GAS["submit_quote"],
             label,
         )
-        # event gives the exact id
-        events = self.oracle.events.QuoteSubmitted().process_receipt(receipt)
-        qid = int(events[0].args.quoteId) if events else qid_before
+        # Parse the event from logs emitted by the oracle only (avoids web3's
+        # "MismatchedABI" warnings for ERC20 Transfer logs in the same tx).
+        qid = self._oracle_event_id(receipt, "QuoteSubmitted")
+        if qid is None:
+            qid = qid_before
         self._own_quotes.add(qid)
         log.info(
             "quoted id=%s base=%s quote=%s price=%s (fair=%s)",
             qid, self.quote_base / E18, quote_amount / E18, quote_amount * E18 // self.quote_base, fair,
         )
         return qid
+
+    def _oracle_event_id(self, receipt, event_name: str) -> Optional[int]:
+        """Extract the first `quoteId` arg of an oracle event from a receipt, decoding
+        only logs that originated from the oracle contract."""
+        from eth_abi import decode
+        from eth_utils import event_signature_to_log_topic
+
+        event_def = getattr(self.oracle.events, event_name).abi
+        sig = event_def["anonymous"] if "anonymous" in event_def else False
+        topic0 = event_signature_to_log_topic(
+            f"{event_name}({','.join(i['type'] for i in event_def['inputs'])})"
+        )
+        for lg in receipt.logs:
+            if lg["address"].lower() != self.oracle_addr.lower():
+                continue
+            if not lg["topics"] or lg["topics"][0].hex() != topic0.hex():
+                continue
+            # quoteId is the first (indexed) arg → topics[1]
+            return int(lg["topics"][1].hex(), 16)
+        return None
 
     def watch_vetoes(self) -> None:
         """FR-BOT-004: withdraw the 2x return on our vetoed quotes, log P&L."""
@@ -245,20 +269,26 @@ class MarketMakerBot:
                 qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
             )
 
-    def settle_round(self) -> None:
-        """After expiry: settle ALL ACTIVE quotes oldest-first; final quote last
-        becomes the canonical 终价 (D-06). Then withdraw our own funds."""
+    def settle_round(self, round_expiry: int) -> None:
+        """After expiry: settle THIS round's ACTIVE quotes oldest-first; final quote last
+        becomes the canonical 终价 (D-06). Then withdraw our own funds.
+        Quotes are matched by the round's expiryBlock so a stale run never touches the
+        live round's quotes."""
         next_id = self.oracle.functions.nextQuoteId().call()
         settled_ids = []
         for qid in range(1, next_id):
             q = self._quote(qid)
             if q[1].lower() != self.base_token.lower() or q[2].lower() != self.quote_token.lower():
                 continue
+            if q[8] != round_expiry:
+                continue  # belongs to a different round
             if q[9] == ACTIVE:
                 self._send(self.oracle.functions.settleValidQuote(qid), GAS["settle"], f"settle q{qid}")
                 settled_ids.append(qid)
         for qid in sorted(self._own_quotes - self._withdrawn):
             q = self._quote(qid)
+            if q[8] != round_expiry:
+                continue
             if q[9] in (SETTLED_VALID, VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 self._send(self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}")
                 self._withdrawn.add(qid)
@@ -280,8 +310,9 @@ class MarketMakerBot:
             GAS["create_market"],
             "createMarket (next round)",
         )
-        events = self.market.events.MarketCreated().process_receipt(receipt)
-        mid = int(events[0].args.marketId)
+        mid = self._market_created_id(receipt)
+        if mid is None:
+            raise RuntimeError("createMarket: MarketCreated event not found")
         log.warning(
             "NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — update web/.env.local NEXT_PUBLIC_DEMO_MARKET_ID=%s",
             mid, new_expiry, current_expiry, mid,
@@ -289,6 +320,21 @@ class MarketMakerBot:
         self.market_id = mid
         self._final_submitted = False
         return mid
+
+    def _market_created_id(self, receipt) -> Optional[int]:
+        """Extract the indexed marketId from MarketCreated (topic1), oracle-free."""
+        from eth_utils import event_signature_to_log_topic
+
+        topic0 = event_signature_to_log_topic(
+            "MarketCreated(uint256,address,address,address,uint256,uint256)"
+        )
+        for lg in receipt.logs:
+            if lg["address"].lower() != self.market_addr.lower():
+                continue
+            if not lg["topics"] or lg["topics"][0].hex() != topic0.hex():
+                continue
+            return int(lg["topics"][1].hex(), 16)
+        return None
 
     # ---------------------------------------------------------------- main loop
 
@@ -307,7 +353,9 @@ class MarketMakerBot:
             log.debug("block=%s expiry=%s (%s left)", block, expiry, expiry - block)
 
             if block > expiry:
-                self.settle_round()
+                # Stale marketId (e.g. after a restart mid/late round): settle the old
+                # round's quotes and roll to a fresh one instead of crashing.
+                self.settle_round(expiry)
                 self.roll_round(expiry)
                 if once:
                     return
@@ -316,7 +364,7 @@ class MarketMakerBot:
 
             # veto watch + restock
             self.watch_vetoes()
-            active = self._active_own_quote()
+            active = self._active_own_quote(expiry)
 
             if expiry - block <= self.lead_blocks and not self._final_submitted:
                 # final settlement quote = mark (D-06/FR-BOT-002)

@@ -1,4 +1,4 @@
-# slide_copy.md — IRMarket Pitch Deck (中文版 4 页)
+# slide_copy.md — IRMarket Pitch Deck (中文版 5 页)
 
 ---
 
@@ -37,7 +37,23 @@ IRMarket 让任何资产都能被免许可地做空。
 
 ---
 
-## PAGE 4 — Demo
+## PAGE 4 — 举个例子：如何用 1 LLM 做空
+
+**举个例子：如何用 1 LLM 做空**
+
+全程链上执行，无需中介，最大亏损 = 本金
+
+流程图（4 步）：
+1. 用户转入 1 LLM
+2. 智能合约按 1:130 兑换
+3. 获得 130 HKD 仓位
+4. 开空仓做空 LLM
+
+到期时若 LLM 价格下跌，空仓获利；若上涨，最大亏损为投入的 1 LLM 本金。无追缴、无爆仓、无需保证金。
+
+---
+
+## PAGE 5 — Demo
 
 **Demo**
 

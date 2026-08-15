@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { Quote, Side } from "@/lib/types";
-import { computeFee, formatAmount, formatPrice } from "@/lib/format";
+import { computeFee, formatAmount, formatCountdown, formatPrice } from "@/lib/format";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useBalances } from "@/hooks/useBalances";
 import { useHydrated } from "@/hooks/useHydrated";
@@ -22,7 +22,7 @@ function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint |
           <span className="text-bear">已过期</span>
         ) : (
           <span className="text-primary">
-            到期还剩 {blockNumber !== undefined ? (quote.expiryBlock - blockNumber).toString() : "…"} blocks
+            到期还剩 {blockNumber !== undefined ? formatCountdown(quote.expiryBlock - blockNumber) : "…"}
           </span>
         )}
       </div>

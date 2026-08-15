@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
-import { decodeEventLog, getAddress } from "viem";
+import { decodeEventLog, getAddress, type Address } from "viem";
 import type { AbiEvent } from "viem";
 import { MONORACLE_ABI } from "@/lib/abis/oracle";
 import { IRMARKET_ABI } from "@/lib/abis/market";
@@ -12,9 +12,22 @@ import type { Position, Side } from "@/lib/types";
 
 const SIDE_LABEL: Record<number, Side> = { 0: "bull", 1: "bear" };
 
+// Monad testnet RPCs cap eth_getLogs at a ~100-block range, so event history must be
+// fetched in chunked windows (verified: "eth_getLogs is limited to a 100 range").
+const LOG_CHUNK_BLOCKS = 100n;
+// Look back ~5000 blocks (~25 min @300ms) for the user's position events. The bot rolls
+// ~600-block rounds, so this covers several rounds without an expensive full scan.
+const LOOKBACK_BLOCKS = 5000n;
+
 const VETO_WRAPPED_EVENT = IRMARKET_ABI.find(
   (e): e is Extract<(typeof IRMARKET_ABI)[number], { type: "event" }> => e.type === "event" && e.name === "VetoWrapped",
 ) as AbiEvent;
+
+interface RawLog {
+  data: `0x${string}`;
+  topics: `0x${string}`[];
+  blockNumber: bigint;
+}
 
 async function readQuote(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
@@ -40,11 +53,44 @@ async function readQuote(
   };
 }
 
+/** eth_getLogs helper that paginates in ≤100-block chunks to satisfy RPC range limits. */
+async function getLogsChunked(
+  publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
+  params: { address: Address; event?: AbiEvent; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint },
+): Promise<RawLog[]> {
+  const ranges: Array<{ from: bigint; to: bigint }> = [];
+  let from = params.fromBlock;
+  while (from <= params.toBlock) {
+    const to = from + LOG_CHUNK_BLOCKS - 1n > params.toBlock ? params.toBlock : from + LOG_CHUNK_BLOCKS - 1n;
+    ranges.push({ from, to });
+    from = to + 1n;
+  }
+
+  // Fetch chunks in small concurrency batches so a throttling RPC doesn't reject them all.
+  const results = await Promise.all(
+    ranges.map(({ from: f, to: t }) =>
+      publicClient
+        .getLogs({
+          address: params.address,
+          event: params.event,
+          args: params.args,
+          fromBlock: f,
+          toBlock: t,
+        })
+        .then((logs) => logs.map((l) => ({ data: l.data, topics: l.topics as `0x${string}`[], blockNumber: BigInt(l.blockNumber) })))
+        .catch(() => [] as RawLog[]),
+    ),
+  );
+  return results.flat();
+}
+
 /**
  * Positions derived from on-chain events (R15 — no IRMarket ledger):
  *  - Wrapper opens: `VetoWrapped(trader = user)` — exact swap in/out + fee.
  *  - Direct vetoes (reverse closes / power users): `QuoteVetoed*` where verifier = user,
  *    amounts reconstructed from `quotes(quoteId)`.
+ *
+ * Monad testnet RPCs limit eth_getLogs to a ~100-block range, so the fetch is chunked.
  */
 export function usePositions(address: `0x${string}` | undefined) {
   const publicClient = usePublicClient();
@@ -55,24 +101,26 @@ export function usePositions(address: `0x${string}` | undefined) {
     queryFn: async (): Promise<Position[]> => {
       if (!publicClient || !address || !isFullyConfigured) return [];
 
+      const latest = blockNumber ?? (await publicClient.getBlockNumber());
+      const fromBlock = latest > LOOKBACK_BLOCKS ? latest - LOOKBACK_BLOCKS : 0n;
+
       const oracle = ORACLE_ADDRESS as `0x${string}`;
-      const fromBlock = 0n;
 
       const wrappedRaw = hasWrapper
-        ? await publicClient
-            .getLogs({
-              address: MARKET_ADDRESS as `0x${string}`,
-              event: VETO_WRAPPED_EVENT,
-              args: { trader: getAddress(address) } as never,
-              fromBlock,
-              toBlock: "latest",
-            })
-            .catch(() => []) as Array<{ data: `0x${string}`; topics: `0x${string}`[]; blockNumber: bigint }>
+        ? await getLogsChunked(publicClient, {
+            address: MARKET_ADDRESS as Address,
+            event: VETO_WRAPPED_EVENT,
+            args: { trader: getAddress(address) },
+            fromBlock,
+            toBlock: latest,
+          })
         : [];
 
-      const routedLogs = (await publicClient
-        .getLogs({ address: oracle, fromBlock, toBlock: "latest" })
-        .catch(() => [])) as Array<{ data: `0x${string}`; topics: `0x${string}`[]; blockNumber: bigint }>;
+      const routedLogs = await getLogsChunked(publicClient, {
+        address: oracle as Address,
+        fromBlock,
+        toBlock: latest,
+      });
 
       const wrapped: Position[] = [];
       for (const log of wrappedRaw) {
@@ -117,10 +165,10 @@ export function usePositions(address: `0x${string}` | undefined) {
         let decoded;
         try {
           decoded = decodeEventLog({
-          abi: MONORACLE_ABI,
-          data: log.data,
-          topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
-        });
+            abi: MONORACLE_ABI,
+            data: log.data,
+            topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
+          });
         } catch {
           continue;
         }
@@ -149,8 +197,8 @@ export function usePositions(address: `0x${string}` | undefined) {
       return [...wrapped, ...vetoed];
     },
     enabled: isFullyConfigured && !!address && !!publicClient,
-    refetchInterval: blockNumber !== undefined ? 4000 : undefined,
-    staleTime: 2000,
+    refetchInterval: blockNumber !== undefined ? 15000 : undefined,
+    staleTime: 5000,
   });
 
   return { positions: query.data ?? [], refetch: query.refetch, status: query.status };

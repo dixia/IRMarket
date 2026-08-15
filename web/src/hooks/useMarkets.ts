@@ -94,5 +94,18 @@ export function useMarkets(): MarketWithMeta[] {
     return m;
   }, [configuredForWrapper, blockNumber]);
 
-  return wrapperMarkets.length > 0 ? wrapperMarkets : [demo];
+  // Sort so markets still in their quote window come first (soonest-expiring first), then
+  // expired ones last. A market is "active" while its expiryBlock is still ahead of now.
+  const sorted = useMemo(() => {
+    const list = wrapperMarkets.length > 0 ? wrapperMarkets : [demo];
+    if (blockNumber === undefined) return list;
+    return [...list].sort((a, b) => {
+      const aActive = a.expiryBlock > blockNumber ? 0 : 1;
+      const bActive = b.expiryBlock > blockNumber ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return a.expiryBlock < b.expiryBlock ? -1 : a.expiryBlock > b.expiryBlock ? 1 : 0;
+    });
+  }, [wrapperMarkets, demo, blockNumber]);
+
+  return sorted;
 }
