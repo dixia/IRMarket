@@ -19,10 +19,10 @@ until review.
 
 ## Source of truth
 
-- Fill content from this repo: `docs/startup-form.md`, `README.md`, `hackathon.md`,
+- Fill content from this repo: `README.md`, `hackathon.md`,
   `deploy.md`/`deployment.json`, `plan/roadmap.md`.
 
 ## Security notes
 
-- `docs/startup-form.md` and `docs/DELTAV_API_KEY.md` are gitignored — never commit them,
-  and never paste the API key into chat/logs.
+- `docs/DELTAV_API_KEY.md` is gitignored — never commit it, and never paste the API key
+  into chat/logs.

@@ -32,6 +32,5 @@ dev_error.txt
 dev_output.txt
 product/GTM.md
 
-# DeltaV startup form snapshot + API key (do not commit)
-docs/startup-form.md
+# DeltaV API key (do not commit)
 docs/DELTAV_API_KEY.md

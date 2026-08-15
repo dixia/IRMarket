@@ -28,6 +28,12 @@ This repo mirrors the folder/document structure of the Monoracle project
 | `plan/` | Roadmap |
 | `product/` | Product analysis, USP, comparisons (GTM.md gitignored) |
 
+## Submission docs
+
+`hackathon.md` is the Mojo submission doc and does **not** support complex markdown. Keep it
+plain: simple `#`/`##` headings, **bold**, and `-` bullet lists only — no tables, fenced code
+blocks, blockquotes, images, or HTML.
+
 ## Commands
 
 ```bash
