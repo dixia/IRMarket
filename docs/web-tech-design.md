@@ -1,11 +1,14 @@
 # IRMarket — Web Tech Design (Veto-Market)
 
-> **Status:** Review ready. Mirrors `docs/prd.md` (V0.8) and **`docs/sc-tech-spec.md` (V0.9)**
-> for the on-chain interface. The frontend is a **veto client**: users trade by vetoing ACTIVE
-> quotes on **MonoracleWindowed** (the IRMarket-deployed fork of Monoracle) — bull via the fee
-> wrapper `openLong`, bear via `openShort`; closes are direct reverse vetoes (D-08/D-11/D-16).
-> No pool, no settlement, no claim (D-09). All decisions referenced are confirmed
-> (D-01 … D-16, Q1 … Q8); flagged items are in §11.
+> **Status:** Review ready (V0.9.1 — doc review applied). Mirrors `docs/prd.md` (V0.8.1) and
+> **`docs/sc-tech-spec.md` (V0.9)** for the on-chain interface. The frontend is a **veto client**:
+> users trade by vetoing ACTIVE quotes on **MonoracleWindowed** (the IRMarket-deployed fork of
+> Monoracle) — bull via the fee wrapper `openLong`, bear via `openShort` (explicit `quoteId`,
+> Q2-A); closes are direct reverse vetoes (D-08/D-11/D-16). No pool, no settlement, no claim
+> (D-09). Decisions D-01 … D-16, Q1 … Q8 confirmed; the wrapper is **implemented**
+> (`contracts/IRMarket.sol`, `0.9.0-vetomarket`). V0.9.1 changes: single static `/trade?m=`
+> route (Q1-A), newest-ACTIVE-quote default (Q3-A), expiry settle-transient + short-close fee
+> top-up (E3/E4), real error set (E2).
 
 ---
 
@@ -78,14 +81,17 @@ Unchanged Ethereum tooling, with Monad-specific behaviors encoded: gas is charge
 
 ```
 /                           market list (one card per marketId; multiple per pair per D-14)
-/markets/[marketId]         market detail + trading panel (core trade page)
+/trade                      market detail + trading panel (core trade page; single static
+                            route — marketId via query param `?m=<marketId>`, Q1-A)
 /positions                  positions (derived from veto + VetoWrapped events)
 ```
 
 Markets are per-`marketId` (each `createMarket` mints a new id, **no pair dedup**, D-14); a
-pair may appear as several cards sorted by expiry. `layout.tsx` hosts the nav shell (logo,
-network badge, wallet, HKD/LLM balances, faucet entry — §5.1). `providers.tsx` is the
-`WagmiProvider` + `QueryClientProvider` shell plus event wiring.
+pair may appear as several cards sorted by expiry. Because `output: "export"` (static) cannot
+pre-render runtime-created marketIds, the detail page is a single static route reading
+`marketId` from `useSearchParams()` (`/trade?m=1`); `/` cards link there. `layout.tsx` hosts
+the nav shell (logo, network badge, wallet, HKD/LLM balances, faucet entry — §5.1).
+`providers.tsx` is the `WagmiProvider` + `QueryClientProvider` shell plus event wiring.
 
 ### 3.2 Module map
 
@@ -94,7 +100,8 @@ src/
 ├─ app/
 │  ├─ layout.tsx             # nav shell (client)
 │  ├─ page.tsx               # market list
-│  ├─ markets/[marketId]/page.tsx  # detail + trading panel
+│  ├─ trade/page.tsx         # detail + trading panel (static route, `?m=<marketId>` via
+│  │                         #   useSearchParams, Q1-A)
 │  └─ positions/page.tsx     # event-derived positions
 ├─ components/
 │  ├─ wallet/                # WalletButton, NetworkBadge, FaucetModal
@@ -161,6 +168,11 @@ deployed" notice when the wrapper address is empty.
   poll `quotes(lastKnownId…nextQuoteId)`; keep only `status == ACTIVE` with
   `block.number <= expiryBlock` (vetoable). Bot restocks immediately after a veto (sc-tech-spec
   §5.1), so normally ≥1 tradeable quote is present.
+- **Default tradeable quote = newest ACTIVE quote (Q3-A):** with D-13 the whole round is
+  vetoable and the bot restocks, so several ACTIVE quotes may coexist (possibly different
+  prices/sizes as the market moves). The UI shows/executes the **newest** one; older ACTIVE
+  quotes are not offered by default (arbitrage on stale quotes is intentional, but kept out of
+  the default path for UX clarity).
 - **Countdown is market-level** (D-13, B8 closed): the round's `expiryBlock` → time left to
   expiry is a simple block→time conversion off `watchBlockNumber`. No per-quote ~600ms race.
 - Degraded states:
@@ -171,8 +183,11 @@ deployed" notice when the wrapper address is empty.
 ### 4.3 Reference price & mid-round marks (B12)
 
 - Query `['price', pair, blockTag]`:
-  - **At/after expiry:** `getLatestPrice` = 终价 (canonical; the bot settles oldest-first,
-    final quote last — D-06/B12).
+  - **At/after expiry:** `getLatestPrice` = 终价 **only after the bot settles the final quote**
+    (oldest-first, final quote last — D-06/B12). Until the first post-expiry settle lands,
+    `getLatestPrice` still holds the **previous round's** value (canonical is per-pair and
+    persists across markets) → the UI shows a transient 「终价结算中（等待 settle）」 state (E4)
+    instead of a stale number; it flips to 终价 once the final quote settles.
   - **Mid-round:** `getLatestPrice` may lag (only updates on settle, B12) → the "current
     price" on market cards/positions marks to the **latest ACTIVE quote's price** from the
     quote stream. `exists=false` (never settled yet) → degraded `等待 bot 建立报价`, trade
@@ -188,7 +203,7 @@ deployed" notice when the wrapper address is empty.
     `QuoteVetoed*` verifier on a wrapped veto is the wrapper contract).
   - `QuoteVetoedUnderpriced` / `QuoteVetoedOverpriced` where `verifier == account` — **direct
     closes / power-user vetoes**.
-- Fetch via `eth_getLogs` (windowed from the account's first block), then read
+- Fetch via `eth_getLogs` (windowed from the market's `createdAtBlock` → now, E6), then read
   `quotes(quoteId)` to reproduce exact amounts/price/direction + the market via event.
 
 Position record:
@@ -230,7 +245,7 @@ bear:  PNL = (开仓价 − 现价) × 份数       市场价值 = held_HKD
   balances, faucet entry.
 - Behaviors: not connected → yellow 「连接钱包」 (injected). Connected → truncated address +
   balances + `Monad Testnet` tag. Chain id ≠ 10143 → 「请切换至 Monad 测试网」 + one-click
-  `switchChain`. Unconnected users on `/markets/[id]` or `/positions`: read-only + CTA.
+  `switchChain`. Unconnected users on `/trade` or `/positions`: read-only + CTA.
 
 ### 5.2 Market list (`/`)
 
@@ -238,15 +253,15 @@ bear:  PNL = (开仓价 − 现价) × 份数       市场价值 = held_HKD
   countdown; current price (mid-round = latest ACTIVE quote; else `getLatestPrice`, fallback
   `—`); 看涨 (green) / 看跌 (red) quick buttons + detail arrow. Multiple markets per pair
   listed by expiry (D-14).
-- Card click → `/markets/[marketId]`; quick button pre-selects that side; unconnected →
+- Card click → `/trade?m=<marketId>`; quick button pre-selects that side; unconnected →
   connect flow first.
 
-### 5.3 Market detail + trading panel (`/markets/[marketId]`) — core page
+### 5.3 Market detail + trading panel (`/trade?m=<marketId>`) — core page
 
 Left card (标的信息): name/备注, current chain price (ACTIVE-quote or `getLatestPrice`),
 market expiry (`expiryBlock`) + countdown. Right card (trade panel):
 
-1. **Quote card (`QuoteCard`)**: the selected ACTIVE quote — 报价 `P`, quote size
+1. **Quote card (`QuoteCard`)**: the **newest ACTIVE quote** (Q3-A) — 报价 `P`, quote size
    (`baseAmount` LLM ⇄ `quoteAmount` HKD, **whole-quote**, B4), 窗口到期 = market expiry.
    无可用报价 degraded state when none (B4).
 2. **Tabs** 看涨 (做多) / 看跌 (做空) — selected = yellow fill. Toggling swaps the payable
@@ -275,6 +290,9 @@ market property shown as countdown, not a per-trade selector).
 - Pre-expiry action: yellow-outlined 「反向平仓」 → reverse-veto preview card (付 `X` 收 `Y`
   @ 新报价 `P'`, **no fee**) → sign **direct** `vetoOverpriced`/`vetoUnderpriced` on
   MonoracleWindowed → position closes on receipt.
+  - **Short-close top-up (E3):** a wrapper short received `quoteAmount − fee` HKD at open, but
+    closing pays the **full** `quoteAmount` HKD → the preview must show 「需补足 X HKD」 and
+    validate balance against `quoteAmount`. The `fee` is the round-trip cost by design (D-16).
 - Post-expiry: card = 「最终盈亏 ( @ 终价 )」 + hint "资产已在钱包，可反向平仓变现或持有"。
   **No 结算/领取 button** (D-09).
 - Empty state: guide to markets + faucet CTA.
@@ -356,7 +374,7 @@ tx. Faucet covers LLM/HKD, not MON.
 
 ### Scenario 1 — 看跌开仓 (bear open, short)
 
-1. `/` → pick 看跌 on the LLM card → `/markets/[marketId]` with short tab pre-selected.
+1. `/` → pick 看跌 on the LLM card → `/trade?m=<marketId>` with short tab pre-selected.
 2. `QuoteCard` shows the ACTIVE quote `P` and its size (付 `baseAmount` LLM / 收
    `quoteAmount − fee` HKD) or 无可用报价 + disabled CTA.
 3. Preview confirms price, size, and 手续费 in HKD; balance check.
@@ -368,14 +386,16 @@ tx. Faucet covers LLM/HKD, not MON.
 
 1. `/positions` → 反向平仓 (yellow outline).
 2. Trade panel reuses the ACTIVE-quote flow in reverse direction, **no fee**; preview 付 `X`
-   收 `Y` @ `P'`.
+   收 `Y` @ `P'`. For a short close the payable is the full `quoteAmount` HKD — show the
+   shortfall vs the `quoteAmount − fee` received at open (「需补足 X HKD」, E3).
 3. Approve MonoracleWindowed for the pay-side token if needed → sign **direct**
    `vetoOverpriced`/`vetoUnderpriced` → on receipt the position disappears.
 
 ### Scenario 3 — 到期 (expiry valuation)
 
-1. Market reaches `expiryBlock`; bot settles oldest-first, final quote last (D-06/B12) →
-   `getLatestPrice` = 终价.
+1. Market reaches `expiryBlock`. Until the bot settles the final quote, UI shows 「终价结算中
+   （等待 settle）」 (E4 — `getLatestPrice` still holds the previous round's value); then the
+   bot settles oldest-first, final quote last (D-06/B12) → `getLatestPrice` = 终价.
 2. Card switches to 最终盈亏 ( @ 终价 ), yellow big-font number, no action button; hint "资产
    已在钱包".
 3. User may reverse-veto 变现 (direct) or hold into the next market round.
@@ -390,6 +410,7 @@ tx. Faucet covers LLM/HKD, not MON.
 | Wrong chain (≠ 10143) | 「请切换至 Monad 测试网」 + one-click switch |
 | No ACTIVE quote (`无可用报价`, B4) | degraded banner; order disabled; poll/WS keeps trying |
 | Market expired (`block.number > expiryBlock`) | trade panel disabled; show 到期 state |
+| Market expired & 终价 not settled yet | 「终价结算中（等待 settle）」 transient; show latest ACTIVE-quote mark, not stale `getLatestPrice` (E4) |
 | `getLatestPrice` exists=false / no settled price | 「等待 bot 建立报价」; price shows — |
 | Insufficient balance (size + fee) | button disabled + hint |
 | Insufficient allowance | promote to approve step per target (§4.6) |
@@ -401,9 +422,18 @@ tx. Faucet covers LLM/HKD, not MON.
 | Tx failure | `TxStatusCard` failed + mapped reason + retry |
 
 Write hooks (`useTrade`) map viem `decodeErrorResult` against the wrapper + fork error sets
-(sc-tech-spec §3.7): `MarketDoesNotExist`, `InvalidToken`, `IdenticalTokens`, `FeeTooHigh`,
-`ExpiryMustBeFuture`, `QuoteNotActive`, `QuoteWindowExpired`, `NoValidPrice`,
-`VerificationWindowExpired`, `QuoteDoesNotExist`, `InsufficientAllowance`, reentrancy + SafeERC20.
+(sc-tech-spec §3.7). On-chain sets (verified against the deployed contracts, E2):
+
+- **IRMarket wrapper:** `MarketDoesNotExist`, `QuotePairMismatch`, `QuoteNotActive`,
+  `QuoteWindowExpired`, `FeeTooHigh`, `ExpiryMustBeFuture`, `InvalidToken`, `IdenticalTokens`
+- **MonoracleWindowed fork:** `VerificationWindowExpired`, `VerificationWindowActive`,
+  `QuoteDoesNotExist`, `QuoteNotActive`, `QuoteAmountTooSmall`, `ZeroBaseAmount`,
+  `ExpiryMustBeFuture`, `NotQuoteProvider`, `NotWithdrawable`
+- **OpenZeppelin / OZ-adjacent (revert-data, not ABI errors):** `ERC20InsufficientAllowance`,
+  `ERC20InsufficientBalance`, `SafeERC20FailedOperation`, `ReentrancyGuardReentrantCall`
+
+`NoValidPrice` is **not** an on-chain revert — it is a UI-side read guard (no settled price),
+handled in the data layer (§4.3), not via `decodeErrorResult`.
 
 ---
 
@@ -417,18 +447,20 @@ start Next dev, teardown.
 Specs (mirror §8 + sc-tech-spec §9):
 
 - `01-smoke`: home renders market cards (per marketId; multi-market per pair listed by
-  expiry, D-14).
+  expiry, D-14); card link → `/trade?m=<marketId>` (Q1-A).
+- `02-whole-quote`: order size = quote size (newest ACTIVE quote, Q3-A); no partial-fill
+  input (B4 UX).
 - `03-short-open`: connect → short tab → preview (quote size, HKD fee) → approve(LLM→wrapper)
   → `openShort` → success → position appears (direction/cost/份数 correct).
 - `04-long-open`: `openLong` gross pull = `quoteAmount + fee` HKD (assert fee reaches MM via
   `VetoWrapped`).
 - `05-reverse-close`: open then **direct** reverse veto; position removed; balances reflect
-  swap; no fee charged on close.
-- `06-expiry`: advance past `expiryBlock`; card shows 最终盈亏 @ 终价 and **no** 领取 button;
-  veto after expiry reverts (`QuoteWindowExpired`/`VerificationWindowExpired`).
+  swap; no fee charged on close (short close shows 「需补足 X HKD」, E3).
+- `06-expiry`: advance past `expiryBlock`; transient 「终价结算中」 until the final quote
+  settles, then 最终盈亏 @ 终价 and **no** 领取 button; veto after expiry reverts
+  (`QuoteWindowExpired`/`VerificationWindowExpired`).
 - `07-wallet`: wrong-chain prompt + switch; unconnected gates trade.
 - `08-degraded`: no ACTIVE quote → 无可用报价; `exists=false` → 等待 bot 建立报价.
-- `02-whole-quote`: order size = quote size; no partial-fill input (B4 UX).
 
 Run: `npx playwright test` (headed variant available). Unit/integration coverage lives in
 `npx hardhat test` (sc-tech-spec §9).
@@ -437,20 +469,24 @@ Run: `npx playwright test` (headed variant available). Unit/integration coverage
 
 ## 11. Flagged Dependencies (specified elsewhere; UI accounts for them)
 
-### 11.1 The IRMarket wrapper interface (sc-tech-spec §3.4) — **specified, not pending**
+### 11.1 The IRMarket wrapper interface (sc-tech-spec §3.4) — **implemented, not pending**
 
-The UI calls these once `contracts/IRMarket.sol` ships:
+`contracts/IRMarket.sol` is implemented (`0.9.0-vetomarket`). The UI calls:
 
 ```
 openLong(uint256 marketId, uint256 quoteId)   // vetoUnderpriced + 1% HKD fee (gross pull)
 openShort(uint256 marketId, uint256 quoteId)  // vetoOverpriced; forwards quoteAmount − fee
 markets(uint256) → Market;  nextMarketId()
-createMarket(...)                             // registry/dapp uses for read-only listing
+createMarket(...)                             // registry write — bot/script only, NOT in the UI
 ```
 
+- **Explicit quoteId (Q2-A):** D-13 (window = round expiry) removed the 600ms race, so the UI
+  commits to a specific quote — see-what-you-sign, zero slippage.
 - Approval target for opens = the **wrapper**; for closes = **MonoracleWindowed** (§4.6).
-- Until the wrapper deploys, the demo can run fee-less direct vetoes (UI shows 0% fee;
-  `CHARGER_FEE_BPS = 0`); flipping D-11 on is a config + `openLong/openShort` switch.
+- **Fee comes from `markets(marketId).feeBps`** (per-market, D-11/D-16) — there is **no global
+  `CHARGER_FEE_BPS` switch**. A market created with `feeBps=0` is fee-free pass-through.
+- `createMarket` is invoked by the deploy script / bot, not exposed in the dapp (listing only
+  reads `markets()` / `MarketCreated`).
 
 ### 11.2 B5 — real quote data source (bot side)
 
@@ -480,5 +516,11 @@ accepting arbitrary amounts (fractional veto out of scope; demo UX choice flagge
 | PRD B4 degraded states | §4.2, §5.3, §9 |
 | SC B4 whole-quote fill | §1.2, §5.3, §11.3 |
 | SC B12 mid-round / expiry marks | §4.3, §4.5 |
+| V0.9.1 route `/trade?m=` (static export, Q1-A) | §3.1, §5.3 |
+| V0.9.1 explicit `quoteId` (Q2-A) | §1.2, §11.1 |
+| V0.9.1 newest-ACTIVE-quote default (Q3-A) | §4.2, §5.3 |
+| V0.9.1 expiry 终价 transient (E4) | §4.3, §8, §9 |
+| V0.9.1 short-close fee top-up (E3) | §5.4, §8 |
+| V0.9.1 real error set (E2) | §9 |
 | PRD §5.1 design spec | §6 |
 | PRD §5.4 scenarios | §8 |
