@@ -217,12 +217,17 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 - 报价、否决（多空换手）、结算、提取、价格读取**全部由 MonoracleWindowed 承担**，IRMarket **不复制任何结算逻辑**（〔v0.8 R15〕："是同一个智能合约"）
 - 分叉来源：上游 `github.com/dixia/monoracle`（`contracts/Monoracle.sol`）；唯一改动 = quote 级 `expiryBlock` 窗口（✅ D-13，用户批准的唯一破例）
+- **已废弃标记（CWV-01）**：上游已将 quote 级 `expiryBlock` 并入主合约；分叉仅在使用中的 Monad 测试网部署服役到上游部署落地为止（见 TODO.md / GH issue #2）
+- 完整错误集（供前端/bot 解析）：`ZeroBaseAmount`、`QuoteAmountTooSmall`、`IdenticalTokens`、`ExpiryMustBeFuture`、`VerificationWindowActive`、`VerificationWindowExpired`、`QuoteDoesNotExist`、`QuoteNotActive`、`NotQuoteProvider`、`NotWithdrawable`
 - `abi/Monoracle.abi.json` 由分叉构建生成
 
 #### 4.1.2 IRMarket 薄层（✅ D-11/D-14：费用包裹 + 工厂）
 
-- `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 工厂注册——**不去重**（D-14）：同一标的可并存多个市场（不同到期/费率），每轮 = 新 marketId
+- `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 工厂注册——**不去重**（D-14）：同一标的可并存多个市场（不同到期/费率），每轮 = 新 marketId；创建时对 oracle `forceApprove` 两种代币（gas 上限 ≈2M）
 - **费用包裹（D-11/D-16）**：入口函数按 HKD 名义额扣 1%（看涨加付入端、看跌从收付出扣）→ 代用户执行 veto（看涨/看跌两个入口函数）
+- `openLong`/`openShort`/`createMarket` 入口 + `markets`/`nextMarketId` 读取 + `version()`（返回 `"0.9.0-vetomarket"` 标注构建）
+- **事件索引**：`MarketCreated` 索引 `marketId`/`baseToken`/`quoteToken`（`marketMaker`/`expiryBlock`/`feeBps` 在 data）；`VetoWrapped` 索引 `quoteId`/`marketId`/`trader`（`side`/金额/`fee` 在 data）——与 `web/src/lib/abis/market.ts` 一致
+- 部署：`script/deploy.js` 一键完成 oracle→market→铸币→createMarket 并写 `deployment.json`；后轮用 `script/create-market.js` 或 bot `AUTO_CREATE_MARKET` 滚动
 - 持仓索引：可选，监听 veto 事件落库；前端亦可纯事件驱动，不需要链上账本
 
 #### 4.1.3 定价与费用模块
@@ -233,6 +238,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 ### 4.2 做市商报价 bot（Demo 版）
 
 - 核心：拉取 06658.HK 真实行情 → 循环 `submitQuote(..., expiryBlock=本轮到期块)`（双边质押）→ 被否决即 withdraw + 补报 → 到期按序 settle（旧先新后）→ withdraw（✅ D-05 间隔可配 `QUOTE_INTERVAL_SECONDS/BLOCKS`）
+- **轮次作用域（FR-BOT 硬性要求）**：一切 quote/settle/restock 以 `quote.expiryBlock == market.expiryBlock` 归属本轮，**禁止只按交易对匹配**；过期 `marketId` 启动时结算旧轮并 roll 到新轮，不得触碰活跃轮报价（曾因只按 pair 匹配致结算崩溃，详见 sc-tech-spec §5.1）
 - 到期：提交最终报价并**最后结算**（✅ D-06/B12，`SETTLEMENT_QUOTE_LEAD_BLOCKS` 提前量）
 - 风控：bot 自身报价即对手方敞口；被否决 = 正常赔付（零和），bot 无需额外对冲逻辑；未否决报价抵押锁定至到期（B12 资本预算）
 - 参考实现：monoracle `bot/verifier.py`（否决侧）与 `script/demo.js`（报价侧）改造而来

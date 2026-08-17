@@ -65,6 +65,13 @@ Monad veto-arbitrage 长/短市场：
 - 本地 env 在 `web/.env.local`（gitignored）；Vercel 部署需在 `web/` 目录执行 `vercel --prod`。
 - 改动后先 `tsc`+`lint`+`build` 再部署；Vercel 链上 chunk 验证耗时，先本地验证。
 
+### Bot (bot/verifier.py)
+- 引号按轮次归属：quote/settle/restock 必须按 `expiryBlock == market.expiryBlock` 过滤，禁止只按交易对匹配（曾因只按 pair 把活跃轮引号当到期引号 settle 而崩溃）。
+- 运行：`bot\.venv\Scripts\python.exe bot\verifier.py`（前台窗口可见）；清后台进程须按 CommandLine 匹配 `verifier`，勿凭 exe 名误杀。
+- web3 v7 异常为 `Web3RPCError`（非 `ValueError`），nonce 竞争需 `except Exception` 后重新读取 nonce。
+- `load_dotenv()` 默认不覆盖已有环境变量；用 `$env:MARKET_ID=n`（PowerShell）可覆盖 `bot/.env` 验证不同轮次。
+- 解码事件勿用 `process_receipt`（对收据中 ERC20 Transfer 等日志报 `MismatchedABI` 噪声）；按 oracle 地址 + topic0 定向抽取（`_oracle_event_id`/`_market_created_id`）。
+
 ### Deployment
 - 合约部署入口 `script/deploy.js`，地址结果写入 `deployment.json`，web 依赖根 env 示例。
 

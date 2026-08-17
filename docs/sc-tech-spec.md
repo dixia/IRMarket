@@ -10,6 +10,12 @@
 > `github.com/dixia/monoracle`) because upstream hard-codes `VERIFICATION_SLOTS = 2`. The fork
 > is the only contract-code exception to the "no vendored Monoracle code" rule (user-approved).
 >
+> **Deprecation (CWV-01):** upstream `github.com/dixia/monoracle` has since merged the per-quote
+> `expiryBlock` requirement into its main contract. `contracts/MonoracleWindowed.sol` now carries
+> a DEPRECATED marker and is kept deployed only until the upstream testnet deployment lands
+> (see TODO.md / GH issue #2). This spec documents the deployed V0.9 fork; alignment to the
+> upstream-main contract is tracked as CWV-01.
+>
 > Reference contracts: upstream `github.com/dixia/monoracle` (`contracts/Monoracle.sol`,
 > `tech-spec.md`). IRMarket keeps the fork's ABI at `abi/Monoracle.abi.json`.
 
@@ -109,6 +115,8 @@ struct Market {
 - `MAX_FEE_BPS = 10000`; `feeBps` validated `< MAX_FEE_BPS` (rejects ≥100%).
 - **No `enabled` kill-switch** — the contract is ownerless/adminless (consistent with §10).
 - `oracle` is a constructor constant (single MonoracleWindowed instance).
+- `version()` returns `"0.9.0-vetomarket"` — a pure-marker view for the frontend/bot to
+  assert they talk to the right wrapper build.
 - **No pair dedup** (D-14): the same underlying may list several option markets with
   different expiries/fees; each round = a new `marketId`.
 
@@ -140,6 +148,7 @@ function createMarket(
   wrapper can veto with this pair's tokens:
   `IERC20(baseToken).forceApprove(oracle, type(uint256).max)` and same for `quoteToken`
   (`forceApprove` rather than `approve` — safe for tokens that require zero-then-approve).
+  The two `forceApprove` calls dominate the tx cost → gas limit ≈ 2M (see §7).
 - **Emission:** `MarketCreated(marketId, baseToken, quoteToken, marketMaker, expiryBlock, feeBps)`.
 - No tokens move in this call. `expiryBlock` is **advisory for the contract** (the wrapper has
   no settlement logic); it drives the bot's per-quote `expiryBlock` (D-13/D-06) and the UI
@@ -223,10 +232,11 @@ All key args `indexed` (Monad Streaming RPC):
 MarketCreated(marketId, baseToken, quoteToken, marketMaker, expiryBlock, feeBps)
 VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)   // quoteId/marketId/trader indexed
 ```
-> Solidity caps non-anonymous events at **3 indexed args**; the wrapper indexes `quoteId`,
-> `marketId`, `trader` (wallet-scoped + quote-join + market feeds) and keeps `side`/amounts/
-> `fee` in `data`. The frontend ABI (`web/src/lib/abis/market.ts`) matches — `side` is
-> `indexed: false`.
+> Solidity caps non-anonymous events at **3 indexed args**. `MarketCreated` indexes
+> `marketId`, `baseToken`, `quoteToken` (wallet/pair-scoped feeds) and keeps `marketMaker`,
+> `expiryBlock`, `feeBps` in `data`. The wrapper indexes `quoteId`, `marketId`, `trader`
+> (wallet-scoped + quote-join + market feeds) and keeps `side`/amounts/`fee` in `data`.
+> The frontend ABI (`web/src/lib/abis/market.ts`) matches — `side` is `indexed: false`.
 >
 > MonoracleWindowed's own events (`QuoteSubmitted` — now with `expiryBlock`,
 > `QuoteVetoedUnderpriced`, `QuoteVetoedOverpriced`, `QuoteSettledValid`, `FundsWithdrawn`)
@@ -236,9 +246,11 @@ VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)   // quoteId/
 
 `MarketDoesNotExist`, `InvalidToken`, `IdenticalTokens`, `FeeTooHigh`, `ExpiryMustBeFuture`,
 `QuotePairMismatch` (pre-check), `QuoteNotActive` (pre-check), `QuoteWindowExpired`
-(pre-check), plus passthrough of oracle errors (`ExpiryMustBeFuture`,
-`VerificationWindowExpired`, `QuoteDoesNotExist`, `QuoteNotActive`,
-`ReentrancyGuardReentrantCall`, `SafeERC20FailedOperation`).
+(pre-check), plus passthrough of oracle errors (full set from `MonoracleWindowed.sol`):
+`ZeroBaseAmount`, `QuoteAmountTooSmall`, `IdenticalTokens`, `ExpiryMustBeFuture`,
+`VerificationWindowActive` (settle too early), `VerificationWindowExpired` (veto too late),
+`QuoteDoesNotExist`, `QuoteNotActive`, `NotQuoteProvider`, `NotWithdrawable`,
+`ReentrancyGuardReentrantCall`, `SafeERC20FailedOperation`.
 
 ### 3.8 Interface to MonoracleWindowed (local `IMonoracleWindowed`)
 
@@ -281,11 +293,15 @@ arbitrary partial fill; arbitrary sizes would require fractional-veto support (o
 2. Each quote stays vetoable until its `expiryBlock`; after a quote is vetoed, the bot
    withdraws (`2×` other side) and **re-quotes immediately** (restocking) so a tradeable
    quote is always available.
-3. Un-vetoed quotes settle after expiry: `settleValidQuote` — **in order, oldest first,
+3. **Round-scoping is mandatory:** every quote/settle/restock decision must be matched by
+   `quote.expiryBlock == market.expiryBlock` — **never by pair alone**. Mid-round bots manage
+   one round and must not touch an expired round's quotes, and a stale `marketId` must not
+   re-settle the live round's quotes. (This scoping bug crashed the bot once.)
+4. Un-vetoed quotes settle after expiry: `settleValidQuote` — **in order, oldest first,
    the round's final quote LAST**, so the canonical price = 终价 (D-06, B12).
-4. `withdrawProviderFunds` to recycle collateral (B7/B12) → next round, configurable
+5. `withdrawProviderFunds` to recycle collateral (B7/B12) → next round, configurable
    interval (`QUOTE_INTERVAL_SECONDS/BLOCKS`).
-5. **Capital note (B12):** un-vetoed quotes lock collateral until expiry; bot budget =
+6. **Capital note (B12):** un-vetoed quotes lock collateral until expiry; bot budget =
    quotes-outstanding × size (demo mints plenty of test tokens).
 
 ### 5.2 Open (long example, via wrapper)
@@ -333,7 +349,9 @@ when a quote settles (B12).
 - **Gas model:** Monad bills **gas limit**, not gas used. Set fixed limits: wrapper
   `openLong/openShort` ≈ 450k (wrapper transfers + oracle veto ≈ 250–300k); fork refs
   (upstream-consistent +1 storage write): `submitQuote` 600k, veto 300k, `settleValidQuote`
-  150k, `withdrawProviderFunds` 200k.
+  150k, `withdrawProviderFunds` 200k; wrapper `createMarket` **2M** (two `forceApprove`
+  dominates, §3.3); ERC20 `approve` 100k. The bot's `GAS` table (`bot/verifier.py`)
+  mirrors these.
 - **Parallel execution:** per-quote storage (`quotes[]`) touches disjoint slots across ids;
   the wrapper adds no global contention.
 - **Streaming RPC:** `VetoWrapped` + the fork's 5 events drive the indexer/UI; keep params
@@ -360,15 +378,24 @@ when a quote settles (B12).
 - Continuous `submitQuote(..., expiryBlock)` per active market round → vetoed ⇒ withdraw +
   re-quote; after expiry settle oldest-first, final quote last → `withdrawProviderFunds`
   (FR-BOT-001/002); veto watch for P&L logging (FR-BOT-004).
+- **Round scope:** all quote/settle/restock filtering by `quote.expiryBlock ==
+  market.expiryBlock`, never pair alone (see §5.1). On a stale `marketId` the bot settles the
+  old round and rolls to a fresh market instead of touching the live round.
 - Receives the 1% wrapper fee (HKD) at `marketMaker` set per market.
-- Adapted from upstream `bot/verifier.py` (veto side) + `script/demo.js` (quoting side).
+- Created from upstream `bot/verifier.py` (veto side) + `script/demo.js` (quoting side).
+- Round-roll helper: `script/create-market.js` (creates the next market, updates
+  `deployment.json`); the bot can also auto-roll via `AUTO_CREATE_MARKET`.
 
 ### 8.3 Market maker / creator
 
-1. Deploy `MonoracleWindowed` + `IRMarket(oracle)` (`script/deploy.js`).
-2. Mint `LLM`/`HKD` (`MockERC20`, `script/deploy-tokens.js`), fund faucet + bot.
-3. Approve MonoracleWindowed (bot), `createMarket(LLM, HKD, botAddr, expiryBlock, feeBps=100)`.
-4. Start quoting with `expiryBlock` = market expiry; keep the round alive for the 3-min demo.
+1. Deploy the full stack with `script/deploy.js`: `MonoracleWindowed` → `IRMarket(oracle)` →
+   mint `LLM`/`HKD` (`MockERC20`) → `createMarket(LLM, HKD, botAddr, expiryBlock, feeBps=100)`.
+   All addresses/ids/tx-hashes land in `deployment.json` in one run.
+2. Fund faucet + bot with `LLM`/`HKD` (minted to deployer in step 1).
+3. Approve MonoracleWindowed (bot), then start quoting with `expiryBlock` = market expiry;
+   keep the round alive for the 3-min demo.
+4. Later rounds: `script/create-market.js` (or the bot's `AUTO_CREATE_MARKET` roll) mint a new
+   `marketId` and update `deployment.json`.
 
 ---
 
@@ -396,11 +423,13 @@ when a quote settles (B12).
 
 - Deploy `MonoracleWindowed` (own instance — the trading venue; upstream's live testnet
   deployment `0x1ABABc60...` is **not** used, its window is fixed 2 slots) then
-  `IRMarket(oracle)` — `script/deploy.js`; write `deployment.json`; wire `.env`,
-  `bot/.env`, `web/.env.local`.
-- Deploy/mint `LLM` (`BASE_TOKEN`) + `HKD` (`QUOTE_TOKEN`) via `MockERC20`
-  (`script/deploy-tokens.js`).
-- `createMarket` for the demo pair; start bot quoting; run demo.
+  `IRMarket(oracle)` via `script/deploy.js` — one run also mints `LLM`/`HKD` (`MockERC20`)
+  and `createMarket`s the demo round; it writes `deployment.json` (oracle/market/tokens,
+  `marketId`, `feeBps`, `expiryBlock`, tx-hashes) and prints the env lines to wire into
+  `.env`, `bot/.env`, `web/.env.local`.
+- Later rounds: `script/create-market.js` (single market, updates `deployment.json`) or the
+  bot's `AUTO_CREATE_MARKET` roll.
+- Run the bot (`bot/verifier.py`), then the demo.
 - Verify on Sourcify/BlockVision (Monad explorer). No upgrade/owner/admin on either contract.
 
 ---
@@ -430,7 +459,10 @@ when a quote settles (B12).
 - **Source:** `contracts/MonoracleWindowed.sol` — fork of upstream
   `github.com/dixia/monoracle` (`contracts/Monoracle.sol`, MIT). **Single behavioral
   change:** per-quote `expiryBlock` window replaces the fixed `VERIFICATION_SLOTS = 2`.
-  The fork is IRMarket's own deployed trading venue; upstream is untouched.
+- **Status: DEPRECATED (CWV-01).** Upstream has since merged the per-quote `expiryBlock`
+  requirement into `Monoracle.sol`; the fork stays deployed only until the upstream testnet
+  deployment lands (TODO.md / GH issue #2). Keep this section as the behavior reference for
+  the deployed V0.9 venue.
 - **ABI:** `abi/Monoracle.abi.json` (regenerated from the fork build — `submitQuote` now
   takes `expiryBlock`, `QuoteSubmitted` carries it, no `VERIFICATION_SLOTS`).
 - **Upstream live testnet (10143):** `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0` —
