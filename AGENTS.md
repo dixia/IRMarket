@@ -68,6 +68,11 @@ Monad veto-arbitrage 长/短市场：
 ### Deployment
 - 合约部署入口 `script/deploy.js`，地址结果写入 `deployment.json`，web 依赖根 env 示例。
 
+### TODO tracking
+- `TODO.md` is **only an index**: each item = one GH issue link + status (OPEN/DONE/blocked).
+- 详情一律写进 GH issue body（`gh issue create -R dixia/IRMarket`）；`TODO.md` 不放细节。
+- 新事项：先开 GH issue，再在 `TODO.md` 加一行引用；完成时更新 issue 状态并同步那一行。
+
 ## Monad Reference Docs
 
 For Monad-specific details (architecture, async/parallel execution, gas model,

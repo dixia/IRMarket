@@ -1,17 +1,10 @@
-# IRMarket — Task Tracker
+# TODO
 
-## Done
-- [x] Repo scaffold — mirror Monoracle folder/doc structure (no old content)
+_Tracking convention: this file is only an index — each item references a GH issue
+(+ status). Details live in the issue body, not here. See AGENTS.md "TODO tracking"._
 
-## In Progress
-- [ ] Product requirement analysis (exotic option market on any priced asset)
+## Migrate `MonoracleWindowed.sol` to latest upstream Monoracle (CWV-01)
 
-## Remaining
-- [ ] Requirements doc
-- [ ] Tech spec
-- [ ] Smart contract(s)
-- [ ] Hardhat test suite
-- [ ] Deploy to Monad testnet
-- [ ] Verification/settlement bot
-- [ ] Next.js frontend
-- [ ] Mojo project submission (screenshot + create/update)
+- GH: https://github.com/dixia/IRMarket/issues/2
+- Status: **OPEN** — upstream requirement covered + implemented (`dd3b1ef`); keep the fork
+  deployed until upstream testnet deploy lands. Details in the issue.

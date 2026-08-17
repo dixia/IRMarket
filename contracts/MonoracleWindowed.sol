@@ -15,6 +15,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  *         period" and the option tenor are the same thing.
  *         Everything else (bilateral collateral, veto swap semantics, settlement,
  *         withdrawal, canonical price read) is identical to upstream.
+ *
+ * @dev    DEPRECATED: upstream `github.com/dixia/monoracle` has since merged the
+ *         per-quote `expiryBlock` requirement into its main contract. See TODO.md.
  */
 contract MonoracleWindowed is ReentrancyGuard {
     using SafeERC20 for IERC20;
