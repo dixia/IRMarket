@@ -30,10 +30,11 @@ export default function HomePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-              任何有价格的东西，都能变成期权
+              Anything with a price can become an option
             </h1>
             <p className="mt-2 max-w-xl text-sm text-text-dim">
-              A 股、Labubu、球星卡… 基于 Monoracle 否决-套利结算：每笔结算价都有双边抵押与链上套利者背书，无需喂价机、无需验证节点。
+              A-shares, Labubu, sports cards… — Monoracle veto-arbitrage settlement: every settlement price is
+              backed by bilateral collateral and on-chain arbitrageurs. No price feeds, no validator nodes.
             </p>
           </div>
         </div>
@@ -43,11 +44,11 @@ export default function HomePage() {
             className="rounded-lg bg-primary px-4 py-2 font-semibold text-black hover:bg-primary-dim transition-colors"
             onClick={() => setFaucetOpen(true)}
           >
-            领取测试币
+            Claim test tokens
           </button>
           {mounted && address && (
             <span className="text-text-dim">
-              钱包余额 · HKD <span className="text-primary">{formatAmount(balances.hkd, 18, 2)}</span>
+              Wallet balance · HKD <span className="text-primary">{formatAmount(balances.hkd, 18, 2)}</span>
               {"  ·  "}
               LLM <span className="text-primary">{formatAmount(balances.llm, 18, 2)}</span>
             </span>
@@ -58,12 +59,12 @@ export default function HomePage() {
       {/* markets */}
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">市场</h2>
-          <span className="text-xs text-text-dim">多空对称 · 3 分钟到期 · 事务性报价</span>
+          <h2 className="text-lg font-semibold">Market</h2>
+          <span className="text-xs text-text-dim">Symmetric long/short · 3-minute expiry · transactional quotes</span>
         </div>
 
         {markets.length === 0 ? (
-          <p className="text-sm text-text-dim">暂无市场。</p>
+          <p className="text-sm text-text-dim">No markets yet.</p>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {markets.map((m) => (
@@ -79,14 +80,15 @@ export default function HomePage() {
 
       {price.status === "settling" && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-          终价结算中（等待 settle）—— bot 正在结算最终报价。
+          Final price settling — the bot is settling the final quote.
         </p>
       )}
 
       {(!isFullyConfigured && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-          合约地址尚未配置（缺 NEXT_PUBLIC_ORACLE_ADDRESS / BASE_TOKEN / QUOTE_TOKEN）。配置后即可显示实时报价与交易入口。
-        </p>
+            Contract addresses not configured (missing NEXT_PUBLIC_ORACLE_ADDRESS / BASE_TOKEN / QUOTE_TOKEN).
+            Live quotes and trading will appear once configured.
+          </p>
       )) ||
         null}
 

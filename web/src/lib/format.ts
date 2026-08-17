@@ -56,7 +56,7 @@ export function shortenAddress(address: string): string {
 }
 
 export function formatCountdown(blocksLeft: bigint): string {
-  if (blocksLeft <= 0n) return "已到期";
+  if (blocksLeft <= 0n) return "Expired";
   const mins = Number(blocksLeft) / 600; // ~600 blocks ≈ 3 min
   if (mins >= 60) return `${Math.floor(mins / 60)}h ${Math.floor(mins % 60)}m`;
   if (mins >= 1) return `${Math.floor(mins)}m ${Math.round((mins % 1) * 60)}s`;

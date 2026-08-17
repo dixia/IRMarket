@@ -28,11 +28,10 @@ export function WalletButton() {
           connect({ connector: injected ?? connectors[0] });
         }}
       >
-        连接钱包
+        Connect wallet
       </button>
     );
   }
-
   const chainTag = chainId === CHAIN_ID ? "Monad Testnet" : `Chain ${chainId}`;
 
   return (

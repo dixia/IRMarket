@@ -54,7 +54,8 @@ export default function PositionsPage() {
   if (!isFullyConfigured) {
     return (
       <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-        合约尚未配置部署地址。配置后即可查看你在链上开的大小仓。
+        The contract deployment addresses aren&apos;t configured. Once configured you&apos;ll be able to
+        see your on-chain positions.
       </p>
     );
   }
@@ -63,14 +64,14 @@ export default function PositionsPage() {
     <div className="space-y-6">
       <section className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">我的持仓</h1>
+          <h1 className="text-2xl font-bold">My positions</h1>
           <p className="mt-1 text-sm text-text-dim">
-            事件派生 · 实时到账 · 随时反向平仓 · 无爆仓风险 · 最大亏损=整单报价
+            Event-derived · instantly settled · reverse-close anytime · no liquidations · max loss = full quote
           </p>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <div className="text-xs text-text-dim">进行中浮动盈亏</div>
+            <div className="text-xs text-text-dim">Open PnL</div>
             <div className={`text-lg font-bold ${totalPnl >= 0n ? "text-bull" : "text-bear"}`}>
               {totalPnl >= 0n ? "+" : ""}
               {(Number(totalPnl) / 10 ** 18).toFixed(2)} HKD
@@ -80,28 +81,28 @@ export default function PositionsPage() {
             className="rounded-lg border border-card-border px-3 py-2 text-sm text-text-dim hover:text-text transition-colors"
             onClick={() => refetch()}
           >
-            刷新
+            Refresh
           </button>
         </div>
       </section>
 
       {!account ? (
         <p className="rounded-lg border border-card-border bg-card p-4 text-sm text-text-dim">
-          连接钱包以查看持仓。
+          Connect a wallet to view your positions.
         </p>
       ) : positions.length === 0 ? (
         <div className="rounded-xl border border-card-border bg-card p-8 text-center">
-          <p className="text-sm text-text-dim">还没有持仓。—— 前往市场页开一单看涨或看跌试试。</p>
+          <p className="text-sm text-text-dim">No positions yet. — Head to the market page and open a long or short to try it out.</p>
         </div>
       ) : (
         <>
-          {/* tabs: 进行中 / 已结算 */}
+          {/* tabs: open / settled */}
           <div className="flex gap-2">
             <TabButton active={tab === "open"} onClick={() => setTab("open")}>
-              进行中 ({openPositions.length})
+              Open ({openPositions.length})
             </TabButton>
             <TabButton active={tab === "settled"} onClick={() => setTab("settled")}>
-              已结算 ({settledPositions.length})
+              Settled ({settledPositions.length})
             </TabButton>
           </div>
 
@@ -116,13 +117,13 @@ export default function PositionsPage() {
 
           {settling && tab === "open" && (
             <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-              终价结算中（等待 settle）—— bot 正在结算最终报价，稍后显示终价。
+              Final price settling — the bot is settling the final quote; the final price will show shortly.
             </p>
           )}
 
           {visible.length === 0 ? (
             <p className="text-sm text-text-dim">
-              {tab === "open" ? "没有进行中的持仓。" : "没有已结算的持仓。"}
+              {tab === "open" ? "No open positions." : "No settled positions."}
             </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
@@ -142,8 +143,9 @@ export default function PositionsPage() {
       )}
 
       <p className="text-xs text-text-dim">
-        说明：持仓由链上事件实时派生的，无需再领取（无中央账本）。反向平仓 = 使用当前 bot 报价买入相反方向，
-        直接否决、无手续费；看跌平仓需补足与开仓手续费的差额。
+        Note: positions are derived live from on-chain events — nothing to claim (no central ledger).
+        Reverse-closing = buy the opposite side with the current bot quote, a direct veto with no fee;
+        closing a short requires topping up the difference to the open fee.
       </p>
     </div>
   );

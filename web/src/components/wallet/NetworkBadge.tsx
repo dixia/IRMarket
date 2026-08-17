@@ -16,9 +16,9 @@ export function NetworkBadge() {
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-bear/40 bg-bear/10 px-3 py-2 text-sm">
-      <span className="text-bear">请切换至 Monad 测试网 (Chain ID {CHAIN_ID})</span>
+      <span className="text-bear">Please switch to Monad Testnet (Chain ID {CHAIN_ID})</span>
       <button className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-black" onClick={() => switchChain({ chainId: CHAIN_ID })}>
-        一键切换
+        Switch now
       </button>
     </div>
   );

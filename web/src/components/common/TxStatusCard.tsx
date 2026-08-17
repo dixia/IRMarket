@@ -14,29 +14,29 @@ export function mapTransactionError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   const map: Array<[RegExp, string]> = [
     // MonoracleWindowed fork errors
-    [/VerificationWindowExpired|QuoteWindowExpired/, "报价已过窗口，请选择最新报价"],
-    [/VerificationWindowActive/, "报价窗口尚未结束，无法否决"],
-    [/QuoteDoesNotExist/, "报价不存在，请刷新后重试"],
-    [/QuoteNotActive/, "报价已失效（已被否决或结算），请选择最新报价"],
-    [/QuoteAmountTooSmall/, "报价金额过小"],
-    [/ZeroBaseAmount/, "报价资产金额为 0"],
-    [/ExpiryMustBeFuture/, "到期时间必须晚于当前区块"],
-    [/NotQuoteProvider/, "仅报价者可执行该操作"],
-    [/NotWithdrawable/, "抵押暂不可提取"],
+    [/VerificationWindowExpired|QuoteWindowExpired/, "Quote window passed — please select the latest quote"],
+    [/VerificationWindowActive/, "Quote window is still open; cannot veto yet"],
+    [/QuoteDoesNotExist/, "Quote not found — please refresh and retry"],
+    [/QuoteNotActive/, "Quote is no longer active (vetoed or settled) — please select the latest quote"],
+    [/QuoteAmountTooSmall/, "Quote amount too small"],
+    [/ZeroBaseAmount/, "Quote asset amount is 0"],
+    [/ExpiryMustBeFuture/, "Expiry must be later than the current block"],
+    [/NotQuoteProvider/, "Only the quote provider can perform this action"],
+    [/NotWithdrawable/, "Collateral can't be withdrawn yet"],
     // IRMarket wrapper errors
-    [/MarketDoesNotExist/, "市场不存在，请刷新后重试"],
-    [/QuotePairMismatch/, "报价与本市场资产不匹配，请选择最新报价"],
-    [/FeeTooHigh/, "手续费费率异常"],
-    [/InvalidToken/, "代币地址无效"],
-    [/IdenticalTokens/, "基础与报价代币不能相同"],
+    [/MarketDoesNotExist/, "Market not found — please refresh and retry"],
+    [/QuotePairMismatch/, "Quote doesn't match this market's assets — please select the latest quote"],
+    [/FeeTooHigh/, "Fee rate is invalid"],
+    [/InvalidToken/, "Invalid token address"],
+    [/IdenticalTokens/, "Base and quote tokens can't be the same"],
     // OpenZeppelin / revert-data errors
-    [/ERC20InsufficientAllowance|InsufficientAllowance|transfer amount exceeds allowance/, "余额授权不足，请先授权"],
-    [/ERC20InsufficientBalance|InsufficientBalance|insufficient funds|execution reverted due to insufficient balance/, "资产余额不足"],
-    [/SafeERC20FailedOperation|transfer from failed|transfer failed/, "代币转账失败，请检查余额与授权"],
-    [/ReentrancyGuardReentrantCall/, "交易冲突，请重试"],
-    [/user rejected|User rejected|ACTION_REJECTED|MetaMask Message Signature|declined/, "已取消签名"],
-    [/Nonce too low|nonce too low|nonce has already been used/, "Nonce 冲突，请重试"],
-    [/The transaction has been reverted|reverted|estimateGas|execution reverted/, "交易被拒绝，请检查报价窗口与授权"],
+    [/ERC20InsufficientAllowance|InsufficientAllowance|transfer amount exceeds allowance/, "Insufficient allowance — please approve first"],
+    [/ERC20InsufficientBalance|InsufficientBalance|insufficient funds|execution reverted due to insufficient balance/, "Insufficient asset balance"],
+    [/SafeERC20FailedOperation|transfer from failed|transfer failed/, "Token transfer failed — check your balance and allowance"],
+    [/ReentrancyGuardReentrantCall/, "Transaction conflict — please retry"],
+    [/user rejected|User rejected|ACTION_REJECTED|MetaMask Message Signature|declined/, "Signature rejected"],
+    [/Nonce too low|nonce too low|nonce has already been used/, "Nonce conflict — please retry"],
+    [/The transaction has been reverted|reverted|estimateGas|execution reverted/, "Transaction reverted — please check the quote window and allowance"],
   ];
   for (const [re, friendly] of map) {
     if (re.test(msg)) return friendly;
@@ -51,7 +51,7 @@ export function TxStatusCard({ state }: { state: TxState }) {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
         <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <span>{state.label ?? "等待确认…"}</span>
+        <span>{state.label ?? "Awaiting confirmation…"}</span>
       </div>
     );
   }
@@ -59,10 +59,10 @@ export function TxStatusCard({ state }: { state: TxState }) {
   if (state.status === "success") {
     return (
       <div className="rounded-lg border border-bull/40 bg-bull/5 p-3 text-sm">
-        <div className="font-semibold text-bull">{state.title ?? "交易成功"}</div>
-        {state.detail ?? <div className="text-text-dim">资产已实时到账，可在持仓页查看。</div>}
+        <div className="font-semibold text-bull">{state.title ?? "Transaction succeeded"}</div>
+        {state.detail ?? <div className="text-text-dim">Assets were settled to your wallet instantly — view them on the positions page.</div>}
         <a className="mt-1 inline-block text-primary underline" href={explorerTxUrl(state.hash)} target="_blank" rel="noreferrer">
-          查看交易 {state.hash.slice(0, 10)}…
+          View transaction {state.hash.slice(0, 10)}…
         </a>
       </div>
     );
@@ -70,7 +70,7 @@ export function TxStatusCard({ state }: { state: TxState }) {
 
   return (
     <div className="rounded-lg border border-bear/40 bg-bear/5 p-3 text-sm">
-      <div className="font-semibold text-bear">交易失败</div>
+      <div className="font-semibold text-bear">Transaction failed</div>
       <div className="text-text-dim">{state.message}</div>
     </div>
   );

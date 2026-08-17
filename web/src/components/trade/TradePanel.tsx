@@ -17,12 +17,12 @@ function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint |
   return (
     <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
       <div className="flex items-center justify-between text-xs text-text-dim">
-        <span>报价 #{quote.quoteId.toString()}</span>
+        <span>Quote #{quote.quoteId.toString()}</span>
         {expired ? (
-          <span className="text-bear">已过期</span>
+          <span className="text-bear">Expired</span>
         ) : (
           <span className="text-primary">
-            到期还剩 {blockNumber !== undefined ? formatCountdown(quote.expiryBlock - blockNumber) : "…"}
+            Expires in {blockNumber !== undefined ? formatCountdown(quote.expiryBlock - blockNumber) : "…"}
           </span>
         )}
       </div>
@@ -30,7 +30,7 @@ function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint |
         {formatPrice(quote.price)} HKD/LLM
       </div>
       <div className="mt-1 text-xs text-text-dim">
-        报价规模（整单成交）: 付 {formatAmount(quote.quoteAmount, 18, 4)} HKD / 收 {formatAmount(quote.baseAmount, 18, 4)} LLM
+        Quote size (all-or-nothing): pay {formatAmount(quote.quoteAmount, 18, 4)} HKD / receive {formatAmount(quote.baseAmount, 18, 4)} LLM
       </div>
     </div>
   );
@@ -111,14 +111,14 @@ export function TradePanel({
 
   const txState: TxState = useMemo(() => {
     if (trade.phase === "approving" || trade.phase === "trading") {
-      return { status: "loading", label: trade.phase === "approving" ? "等待授权签名…" : "等待交易确认…" };
+      return { status: "loading", label: trade.phase === "approving" ? "Awaiting approval signature…" : "Awaiting transaction confirmation…" };
     }
     if (trade.phase === "success" && trade.tradeHash) {
       return {
         status: "success",
         hash: trade.tradeHash,
-        title: "开仓成功",
-        detail: `已收到资产并实时到账，可在持仓页查看。`,
+        title: "Position opened",
+        detail: "Assets were settled to your wallet instantly — view them on the positions page.",
       };
     }
     if (trade.phase === "error" && trade.error) {
@@ -130,33 +130,33 @@ export function TradePanel({
   const canTrade = isFullyConfigured && !!account && !!selected && !insufficientBalance && !trade.phase?.startsWith("approv") && trade.phase !== "trading";
 
   const buttonLabel = !account
-    ? "连接钱包"
+    ? "Connect wallet"
     : !selected
-      ? "无可用报价"
+      ? "No quote available"
       : insufficientBalance
-        ? "余额不足"
+        ? "Insufficient balance"
         : trade.needApproval
-          ? "授权"
+          ? "Approve"
           : side === "bull"
-            ? "确认看涨开仓"
-            : "确认看跌开仓";
+            ? "Confirm long position"
+            : "Confirm short position";
 
   return (
     <div className="rounded-xl border border-card-border bg-card p-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold">交易面板</h2>
-        <span className="text-xs text-text-dim">多空市场 · 默认 3 分钟到期 · 随时反向平仓 · 无爆仓风险</span>
+        <h2 className="font-semibold">Trade panel</h2>
+        <span className="text-xs text-text-dim">Long/short market · 3-minute default expiry · reverse-close anytime · no liquidations</span>
       </div>
 
       {!isFullyConfigured && (
         <div className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-          合约尚未配置部署地址，等待 bot 建立报价后即可交易。
+          Contract addresses not configured; trading starts once the bot posts quotes.
         </div>
       )}
 
       {isFullyConfigured && !selected && (
         <div className="mt-3 rounded-lg border border-bear/30 bg-bear/5 p-3 text-sm text-bear">
-          无可用报价 —— bot 暂停或抵押不足（等待报价中）。
+          No quote available — bot paused or out of collateral (waiting for quotes).
         </div>
       )}
 
@@ -172,7 +172,7 @@ export function TradePanel({
               }`}
               onClick={() => setManualSide("bull")}
             >
-              看涨（做多）
+              Long
             </button>
             <button
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
@@ -180,37 +180,37 @@ export function TradePanel({
               }`}
               onClick={() => setManualSide("bear")}
             >
-              看跌（做空）
+              Short
             </button>
           </div>
 
           {/* preview */}
           <div className="mt-3 rounded-lg bg-card-border/20 p-3 text-sm space-y-1">
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">付</span>
+              <span className="text-text-dim">Pay</span>
               <span>{preview ? formatAmount(preview.payAmount, 18, 4) : "—"} {preview?.payLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">收</span>
+              <span className="text-text-dim">Receive</span>
               <span>{preview ? formatAmount(preview.receiveAmount, 18, 4) : "—"} {preview?.receiveLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">手续费 ({Number(feeBps) / 100}%)</span>
+              <span className="text-text-dim">Fee ({Number(feeBps) / 100}%)</span>
               <span>{preview ? formatAmount(preview.fee, 18, 4) : "—"} HKD</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">成交价</span>
+              <span className="text-text-dim">Fill price</span>
               <span>{selected ? formatPrice(selected.price) : "—"}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">最大亏损</span>
+              <span className="text-text-dim">Max loss</span>
               <span className="text-bear">{preview ? formatAmount(preview.maxLoss, 18, 4) : "—"}</span>
             </div>
           </div>
 
           <div className="mt-2 flex justify-between text-xs text-text-dim">
-            <span>{side === "bull" ? "可用 HKD 余额" : "可用 LLM 余额"}: {formatAmount(balanceFor, 18, 4)}</span>
-            {insufficientBalance && <span className="text-bear">余额不足</span>}
+            <span>{side === "bull" ? "Available HKD balance" : "Available LLM balance"}: {formatAmount(balanceFor, 18, 4)}</span>
+            {insufficientBalance && <span className="text-bear">Insufficient balance</span>}
           </div>
 
           {/* order button */}

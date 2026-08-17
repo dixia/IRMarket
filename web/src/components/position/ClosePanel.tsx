@@ -76,14 +76,14 @@ export function ClosePanel({
 
   const txState: TxState = useMemo(() => {
     if (trade.phase === "approving" || trade.phase === "trading") {
-      return { status: "loading", label: trade.phase === "approving" ? "等待授权签名…" : "等待平仓确认…" };
+      return { status: "loading", label: trade.phase === "approving" ? "Awaiting approval signature…" : "Awaiting close confirmation…" };
     }
     if (trade.phase === "success" && trade.tradeHash) {
       return {
         status: "success",
         hash: trade.tradeHash,
-        title: "平仓成功",
-        detail: "持仓已按当前报价换回资产，此卡片将自动移除。",
+        title: "Close succeeded",
+        detail: "Position was swapped back to assets at the current quote; this card will self-remove.",
       };
     }
     if (trade.phase === "error" && trade.error) {
@@ -96,21 +96,21 @@ export function ClosePanel({
     !!address && !!selected && !insufficient && trade.phase !== "approving" && trade.phase !== "trading";
 
   const buttonLabel = !address
-    ? "连接钱包"
+    ? "Connect wallet"
     : !selected
-      ? "无可用报价"
+      ? "No quote available"
       : insufficient
-        ? "余额不足"
+        ? "Insufficient balance"
         : trade.needApproval
-          ? "授权"
+          ? "Approve"
           : closeSide === "bull"
-            ? "确认反向平仓（做多回补）"
-            : "确认反向平仓（做空回补）";
+            ? "Confirm reverse close (cover long)"
+            : "Confirm reverse close (cover short)";
 
   return (
     <div className="rounded-xl border border-primary/40 bg-card p-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">反向平仓 #{position.quoteId.toString()}</h3>
+        <h3 className="font-semibold">Reverse close #{position.quoteId.toString()}</h3>
         <button className="text-sm text-text-dim hover:text-text" onClick={onClosed}>
           ✕
         </button>
@@ -118,38 +118,38 @@ export function ClosePanel({
 
       {!selected ? (
         <p className="mt-3 rounded-lg border border-bear/30 bg-bear/5 p-3 text-sm text-bear">
-          无可用报价（bot 暂停 / 抵押滚动中），稍后重试。
+          No quote available (bot paused / collateral rolling) — please retry shortly.
         </p>
       ) : (
         <>
           <div className="mt-3 rounded-lg bg-primary/5 p-3 text-sm space-y-1">
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">成交价</span>
+              <span className="text-text-dim">Fill price</span>
               <span>{formatPrice(selected.price)} HKD/LLM</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">付</span>
+              <span className="text-text-dim">Pay</span>
               <span>{formatAmount(payAmount, 18, 4)} {closeSide === "bull" ? "HKD" : "LLM"}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">收</span>
+              <span className="text-text-dim">Receive</span>
               <span>{formatAmount(receiveAmount, 18, 4)} {closeSide === "bull" ? "LLM" : "HKD"}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">手续费</span>
-              <span>0（直接否决，绕过包装器）</span>
+              <span className="text-text-dim">Fee</span>
+              <span>0 (direct veto, bypasses wrapper)</span>
             </div>
             {shortfall > 0n && (
               <div className="flex justify-between gap-6 font-semibold text-bear">
-                <span>需补足（开仓时已扣手续费）</span>
+                <span>Top-up required (fee deducted at open)</span>
                 <span>{formatAmount(shortfall, 18, 4)} HKD</span>
               </div>
             )}
           </div>
 
           <div className="mt-2 flex justify-between text-xs text-text-dim">
-            <span>可用 {closeSide === "bull" ? "HKD" : "LLM"} 余额: {formatAmount(balanceFor, 18, 4)}</span>
-            {insufficient && <span className="text-bear">余额不足</span>}
+            <span>Available {closeSide === "bull" ? "HKD" : "LLM"} balance: {formatAmount(balanceFor, 18, 4)}</span>
+            {insufficient && <span className="text-bear">Insufficient balance</span>}
           </div>
 
           <button

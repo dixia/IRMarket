@@ -24,18 +24,18 @@ export function MarketCard({
               {market.ticker}
             </span>
           </div>
-          <span className="text-[11px] text-text-dim">港股食品股</span>
+          <span className="text-[11px] text-text-dim">HK food stock</span>
         </div>
 
         <div className="mt-3 flex items-end justify-between">
           <div>
-            <div className="text-xs text-text-dim">当前价格 (HKD)</div>
+            <div className="text-xs text-text-dim">Current price (HKD)</div>
             <div className="text-2xl font-bold text-primary">
               {formatPrice(price)}
             </div>
           </div>
           <div className="text-right text-xs text-text-dim">
-            <div>到期</div>
+            <div>Expiry</div>
             <BlockCountdown expiryBlock={market.expiryBlock} />
           </div>
         </div>
@@ -47,16 +47,16 @@ export function MarketCard({
             href={`${href}&side=long`}
             className="rounded-lg bg-bull/15 px-3 py-1 text-sm font-semibold text-bull hover:bg-bull/25 transition-colors"
           >
-            看涨
+            Long
           </Link>
           <Link
             href={`${href}&side=short`}
             className="rounded-lg bg-bear/15 px-3 py-1 text-sm font-semibold text-bear hover:bg-bear/25 transition-colors"
           >
-            看跌
+            Short
           </Link>
         </div>
-        <Link href={href} className="text-text-dim transition-transform hover:translate-x-0.5" aria-label="进入交易">
+        <Link href={href} className="text-text-dim transition-transform hover:translate-x-0.5" aria-label="Open trading">
           →
         </Link>
       </div>

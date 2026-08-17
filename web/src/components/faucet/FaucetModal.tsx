@@ -45,22 +45,22 @@ export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => v
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">测试水龙头</h2>
+          <h2 className="text-lg font-semibold">Test token faucet</h2>
           <button className="text-text-dim hover:text-text" onClick={onClose}>
             ✕
           </button>
         </div>
 
         {!isFullyConfigured ? (
-          <p className="mt-3 text-sm text-bear">代币合约尚未配置，无法发放。</p>
+          <p className="mt-3 text-sm text-bear">Token contracts aren&apos;t configured; can&apos;t mint.</p>
         ) : (
           <>
             <p className="mt-2 text-sm text-text-dim">
-              免费领取 <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} LLM</span> 与{" "}
-              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} HKD</span>（测试代币，用于体验交易）。
+              Claim <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} LLM</span> and{" "}
+              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} HKD</span> for free (test tokens to try out trading).
             </p>
 
-            <label className="mt-4 block text-xs text-text-dim">接收地址</label>
+            <label className="mt-4 block text-xs text-text-dim">Recipient address</label>
             <input
               className="mt-1 w-full rounded-lg border border-card-border bg-bg-dark px-3 py-2 text-sm font-mono focus:border-primary outline-none"
               value={target}
@@ -73,11 +73,11 @@ export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => v
               disabled={busy || !target}
               onClick={mint}
             >
-              {busy ? "铸造中…" : done ? "已完成 ✓" : "领取测试币"}
+              {busy ? "Minting…" : done ? "Done ✓" : "Claim test tokens"}
             </button>
 
             {((mintBase.data && baseReceipt.status === "error") || (mintQuote.data && quoteReceipt.status === "error")) && (
-              <p className="mt-2 text-xs text-bear">铸造失败，请重试。</p>
+              <p className="mt-2 text-xs text-bear">Minting failed — please retry.</p>
             )}
           </>
         )}

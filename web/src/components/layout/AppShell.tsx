@@ -9,8 +9,8 @@ import { NetworkBadge } from "@/components/wallet/NetworkBadge";
 import { FaucetModal } from "@/components/faucet/FaucetModal";
 
 const NAV = [
-  { href: "/", label: "市场" },
-  { href: "/positions", label: "持仓" },
+  { href: "/", label: "Market" },
+  { href: "/positions", label: "Positions" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -45,7 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="rounded-lg border border-primary/40 px-3 py-2 text-sm text-primary hover:bg-primary/10 transition-colors"
               onClick={() => setFaucetOpen(true)}
             >
-              领取测试币
+              Claim test tokens
             </button>
             <WalletButton />
           </div>

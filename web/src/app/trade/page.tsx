@@ -12,7 +12,7 @@ import { isFullyConfigured } from "@/lib/config";
 
 export default function TradePage() {
   return (
-    <Suspense fallback={<p className="text-sm text-text-dim">加载市场…</p>}>
+    <Suspense fallback={<p className="text-sm text-text-dim">Loading market…</p>}>
       <TradeContent />
     </Suspense>
   );
@@ -34,7 +34,7 @@ function TradeContent() {
   );
 
   if (!market) {
-    return <p className="text-sm text-text-dim">市场不存在。</p>;
+    return <p className="text-sm text-text-dim">Market not found.</p>;
   }
 
   return (
@@ -49,32 +49,33 @@ function TradeContent() {
             </span>
           </div>
           <div className="text-right">
-            <div className="text-xs text-text-dim">到期</div>
+            <div className="text-xs text-text-dim">Expiry</div>
             <BlockCountdown expiryBlock={market.expiryBlock} />
           </div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
           <Stat
-            label="当前价格"
+            label="Current price"
             value={
               price.status === "ok"
                 ? `${formatPrice(price.price)} HKD`
                 : price.status === "settling"
-                  ? "结算中"
+                  ? "Settling"
                   : "—"
             }
             accent
           />
-          <Stat label="市场状态" value="Ongoing" />
-          <Stat label="报价方式" value="Bot 报价" />
-          <Stat label="手续费" value={`${Number(market.feeBps) / 100}% (仅开仓)`} />
+          <Stat label="Market status" value="Ongoing" />
+          <Stat label="Quote mode" value="Bot quotes" />
+          <Stat label="Fee" value={`${Number(market.feeBps) / 100}% (open only)`} />
         </div>
       </section>
 
       {price.status === "settling" && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-          终价结算中（等待 settle）—— 最终报价尚未结算，当前报价为上一轮数值，请稍候。
+          Final price settling — the last quote hasn&apos;t been settled yet; the price shown is from the
+          previous round. Please wait.
         </p>
       )}
 
@@ -92,11 +93,11 @@ function TradeContent() {
 
       {/* how it works */}
       <section className="rounded-xl border border-card-border bg-card p-4">
-        <h2 className="font-semibold">它是怎么结算的？</h2>
+        <h2 className="font-semibold">How does it settle?</h2>
         <ul className="mt-3 grid gap-2 text-sm text-text-dim md:grid-cols-3">
-          <li>1. 报价：bot 通过双边抵押提交价格报价，报价期内任何人可校验。</li>
-          <li>2. 交易：看涨持有资产、看跌持有现金，方向看错最大亏损=整单报价，无爆仓。</li>
-          <li>3. 结算：若报价失真，链上套利者行使否决权并扣抵押 —— 结算价由市场背书。</li>
+          <li>1. Quote: the bot posts a price backed by bilateral collateral; anyone can verify it during the quote window.</li>
+          <li>2. Trade: bulls hold the asset, bears hold cash. Max loss = the full quote you paid; no liquidations.</li>
+          <li>3. Settle: if a quote is off-market, on-chain arbitrageurs exercise the veto and slash collateral — the settlement price is market-backed.</li>
         </ul>
       </section>
     </div>

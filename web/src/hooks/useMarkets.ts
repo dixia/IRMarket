@@ -19,8 +19,8 @@ function demoMarket(): MarketWithMeta {
     feeBps: 100n, // 1%
     createdAtBlock: 0n,
     expiryBlock: EXPIRY_BLOCKS,
-    name: "溜溜梅",
-          ticker: "LLM 06658.HK",
+    name: "Liuliumei",
+    ticker: "LLM 06658.HK",
   };
 }
 
@@ -77,8 +77,8 @@ export function useMarkets(): MarketWithMeta[] {
           feeBps: Array.isArray(r) ? (r[3] as bigint) : (r as unknown as { feeBps: bigint }).feeBps,
           expiryBlock: Array.isArray(r) ? (r[4] as bigint) : (r as unknown as { expiryBlock: bigint }).expiryBlock,
           createdAtBlock: Array.isArray(r) ? (r[5] as bigint) : (r as unknown as { createdAtBlock: bigint }).createdAtBlock,
-          name: "溜溜梅",
-    ticker: "LLM 06658.HK",
+          name: "Liuliumei",
+          ticker: "LLM 06658.HK",
         } satisfies MarketWithMeta;
       })
       .filter((m): m is MarketWithMeta => m !== null);

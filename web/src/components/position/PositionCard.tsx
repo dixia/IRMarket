@@ -48,7 +48,7 @@ export function PositionCard({
                 position.side === "bull" ? "bg-bull/15 text-bull" : "bg-bear/15 text-bear"
               }`}
             >
-              {position.side === "bull" ? "看涨 · 持有 LLM" : "看跌 · 持有 HKD"}
+              {position.side === "bull" ? "Long · Holds LLM" : "Short · Holds HKD"}
             </span>
             <span className="rounded-md bg-card-border/40 px-2 py-0.5 text-[11px] text-text-dim">
               #{position.quoteId.toString()}
@@ -56,17 +56,17 @@ export function PositionCard({
           </div>
           <div className="mt-3 space-y-1 text-sm">
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">开仓价</span>
+              <span className="text-text-dim">Open price</span>
               <span>{formatPrice(position.openPrice)}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">当前报价</span>
+              <span className="text-text-dim">Current quote</span>
               <span>
-                {settling ? "终价结算中…" : formatPrice(price)}
+                {settling ? "Settling…" : formatPrice(price)}
               </span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">{expired ? "最终市值" : "持仓市值"}</span>
+              <span className="text-text-dim">{expired ? "Final value" : "Market value"}</span>
               <span>
                 {position.side === "bull"
                   ? `${formatAmount(position.heldBase, 18, 4)} LLM`
@@ -74,13 +74,13 @@ export function PositionCard({
               </span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">{expired ? "最终盈亏" : "浮动盈亏"}</span>
+              <span className="text-text-dim">{expired ? "Final PnL" : "Floating PnL"}</span>
               <span className={pnl !== undefined && pnl >= 0n ? "text-bull" : "text-bear"}>
-                {settling ? "结算中…" : formatPnl(pnl)}
+                {settling ? "Settling…" : formatPnl(pnl)}
               </span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-text-dim">到期</span>
+              <span className="text-text-dim">Expiry</span>
               <BlockCountdown expiryBlock={position.expiryBlock} />
             </div>
           </div>
@@ -88,7 +88,7 @@ export function PositionCard({
         <div className="shrink-0">
           {expired ? (
             <span className="rounded-md bg-primary/15 px-2 py-1 text-xs font-semibold text-primary">
-              已结算
+              Settled
             </span>
           ) : (
             canClose && (
@@ -96,7 +96,7 @@ export function PositionCard({
                 className="rounded-lg border border-primary px-3 py-1.5 text-sm text-primary hover:bg-primary/10 transition-colors"
                 onClick={() => onClose(position)}
               >
-                反向平仓
+                Reverse close
               </button>
             )
           )}
@@ -104,7 +104,8 @@ export function PositionCard({
       </div>
       {expired && (
         <p className="mt-3 text-xs text-text-dim">
-          最终盈亏以终价标记；资产已在你的钱包，可反向平仓变现或继续持有。无需结算/领取。
+          Final PnL is marked at the final price; the assets are already in your wallet —
+          reverse-close to cash out or hold. No settlement or claim needed.
         </p>
       )}
     </div>
