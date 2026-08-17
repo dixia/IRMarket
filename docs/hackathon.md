@@ -74,4 +74,4 @@ IRMarket 是 Monad 上的免许可二元期权市场。任何人都可以为任�
 
 ### Demo Frontend
 
-https://irmarket-h-fbf5.vercel.app
+https://irmarket.xyz
