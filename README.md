@@ -14,7 +14,7 @@ No off-chain data feeds, no validators.
   permissionless actor can veto-arbitrage it during a ~600ms verification window; if it
   survives, `getLatestPrice` returns the canonical price. No off-chain feeds.
 - **Markets:** anyone can open an option market on any priced asset. Demo underlying:
-  溜溜梅 (**LLM**, 06658.HK), settled in a test **HKD** token.
+  (**LLM**, 6658), settled in a test **HKD** token.
 - **Trading:** users pick **call / put**, invest HKD, and get position units
   (`investment ÷ open reference price`). A ~1% spread is charged as implicit fees.
 - **Expiry:** default **3 minutes** (≈600 blocks), selectable in UI. No liquidation,
