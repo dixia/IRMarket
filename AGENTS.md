@@ -62,8 +62,9 @@ Monad veto-arbitrage 长/短市场：
 - wagmi 水合不一致需 `useHydrated` 钩子。
 - 合约价格为 1e18 固定点，显示需除以 1e18；一律走 `formatPrice`/`formatPnl`（`web/src/lib/format.ts`），勿直接用 `toNumberString(price, 6)`。
 - 函数 selector 用 ethers 现算，勿手写。
-- 本地 env 在 `web/.env.local`（gitignored）；Vercel 部署需在 `web/` 目录执行 `vercel --prod`。
+- 本地 env 在 `web/.env.local`（gitignored）。
 - 改动后先 `tsc`+`lint`+`build` 再部署；Vercel 链上 chunk 验证耗时，先本地验证。
+- Vercel 项目 `irmarket`（h-fbf5），域名 `irmarket.xyz`。链接后从 **repo root** 部署：`npx vercel --prod --yes`；**禁止**在 repo root 创建 `.vercel` 目录（会覆盖 `web` root directory 设置导致 "Root Directory does not exist" 错误）。
 
 ### Bot (bot/verifier.py)
 - 引号按轮次归属：quote/settle/restock 必须按 `expiryBlock == market.expiryBlock` 过滤，禁止只按交易对匹配（曾因只按 pair 把活跃轮引号当到期引号 settle 而崩溃）。

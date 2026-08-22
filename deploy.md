@@ -43,4 +43,33 @@ npx hardhat test
 
 ## Vercel (frontend)
 
-(TODO — Vercel project + `NEXT_PUBLIC_*` env vars)
+**Project:** `irmarket` (h-fbf5/irmarket)
+**Custom domain:** https://www.irmarket.xyz
+**Root Directory:** `web`
+
+### Prerequisites
+
+- `web/.env.local` with `NEXT_PUBLIC_*` vars (see `web/.env.local.example`)
+- Vercel CLI authenticated (`npx vercel login`)
+
+### 1. Link project (one-time)
+
+```bash
+cd web
+npx vercel link --yes --project irmarket
+```
+
+Creates `.vercel/project.json` in `web/`. **Do NOT create `.vercel` in the repo root** — it overrides the `web` root directory setting and causes "Root Directory does not exist" errors.
+
+### 2. Deploy
+
+```bash
+npx vercel --prod --yes
+```
+
+Run from the **repo root**, not from `web/`.
+
+### 3. Verify
+
+- Production: https://irmarket.xyz
+- Inspect: https://vercel.com/h-fbf5/irmarket
