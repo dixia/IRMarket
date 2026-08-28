@@ -4,27 +4,11 @@ import { useReadContracts } from "wagmi";
 import { useMemo } from "react";
 import { IRMARKET_ABI } from "@/lib/abis/market";
 import { useCurrentBlock } from "./useCurrentBlock";
-import { BASE_TOKEN, DEMO_MARKET_ID, EXPIRY_SECONDS, MARKET_ADDRESS, MARKET_ADDRESS_RAW, QUOTE_TOKEN, hasWrapper } from "@/lib/config";
+import { useTokenMeta } from "./useTokenMeta";
+import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, hasWrapper } from "@/lib/config";
 import type { MarketWithMeta } from "@/lib/types";
 
-const EXPIRY_BLOCKS = BigInt(EXPIRY_SECONDS) / 300n; // ~300ms blocks
-
-/** The demo market as the default fallback when the wrapper isn't deployed yet. */
-function demoMarket(): MarketWithMeta {
-  return {
-    marketId: DEMO_MARKET_ID,
-    baseToken: BASE_TOKEN as `0x${string}`,
-    quoteToken: QUOTE_TOKEN as `0x${string}`,
-    marketMaker: "0x0000000000000000000000000000000000000000",
-    feeBps: 100n, // 1%
-    createdAtBlock: 0n,
-    expiryBlock: EXPIRY_BLOCKS,
-    name: "Liuliumei",
-    ticker: "LLM 06658.HK",
-  };
-}
-
-/** Markets: factory registry when the wrapper is configured; else the demo market config. */
+/** Markets: factory registry when the wrapper is configured; else empty. */
 export function useMarkets(): MarketWithMeta[] {
   const blockNumber = useCurrentBlock();
   const configuredForWrapper = hasWrapper && MARKET_ADDRESS_RAW !== "";
@@ -84,28 +68,44 @@ export function useMarkets(): MarketWithMeta[] {
       .filter((m): m is MarketWithMeta => m !== null);
   }, [configuredForWrapper, marketsData, marketIds]);
 
-  // Union: wrapper markets if any; otherwise demo market. Demo market expiry is relative to
-  // the current block when the wrapper is absent (bot uses this cadence per D-05/D-13).
-  const demo = useMemo(() => {
-    const m = demoMarket();
-    if (blockNumber !== undefined && !configuredForWrapper) {
-      m.expiryBlock = blockNumber + EXPIRY_BLOCKS;
-    }
-    return m;
-  }, [configuredForWrapper, blockNumber]);
+  const tokenAddresses = useMemo(
+    () =>
+      wrapperMarkets.reduce<`0x${string}`[]>((acc, m) => {
+        if (!acc.includes(m.baseToken)) acc.push(m.baseToken);
+        if (!acc.includes(m.quoteToken)) acc.push(m.quoteToken);
+        return acc;
+      }, []),
+    [wrapperMarkets],
+  );
+  const metaMap = useTokenMeta(tokenAddresses);
+
+  const enriched = useMemo(
+    () =>
+      wrapperMarkets.map((m) => {
+        const baseMeta = metaMap.get(m.baseToken.toLowerCase());
+        const quoteMeta = metaMap.get(m.quoteToken.toLowerCase());
+        const baseSymbol = baseMeta?.symbol ?? "???";
+        const quoteSymbol = quoteMeta?.symbol ?? "???";
+        return {
+          ...m,
+          name: `${baseSymbol}/${quoteSymbol}`,
+          ticker: `${baseSymbol}/${quoteSymbol}`,
+        };
+      }),
+    [wrapperMarkets, metaMap],
+  );
 
   // Sort so markets still in their quote window come first (soonest-expiring first), then
   // expired ones last. A market is "active" while its expiryBlock is still ahead of now.
   const sorted = useMemo(() => {
-    const list = wrapperMarkets.length > 0 ? wrapperMarkets : [demo];
-    if (blockNumber === undefined) return list;
-    return [...list].sort((a, b) => {
+    if (blockNumber === undefined) return enriched;
+    return [...enriched].sort((a, b) => {
       const aActive = a.expiryBlock > blockNumber ? 0 : 1;
       const bActive = b.expiryBlock > blockNumber ? 0 : 1;
       if (aActive !== bActive) return aActive - bActive;
       return a.expiryBlock < b.expiryBlock ? -1 : a.expiryBlock > b.expiryBlock ? 1 : 0;
     });
-  }, [wrapperMarkets, demo, blockNumber]);
+  }, [enriched, blockNumber]);
 
   return sorted;
 }

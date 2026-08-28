@@ -21,8 +21,9 @@ export function useNextQuoteId() {
 
 /**
  * Read quotes in a trailing window [nextQuoteId − N, nextQuoteId). Filters to ACTIVE,
- * in-window quotes for the given pair. Used by the market list (mid-round marks) and the
- * trading panel (pick a tradeable quote).
+ * in-window quotes for the given pair (or all quotes when pair is null). Used by the
+ * market list (mid-round marks), the trading panel (pick a tradeable quote), and the
+ * positions page (determine which pairs have live quotes for close eligibility).
  */
 export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | null) {
   const nextQuoteIdRaw = useNextQuoteId();
@@ -39,7 +40,7 @@ export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | 
     return ids;
   }, [nextQuoteId]);
 
-  const enabled = isFullyConfigured && pair !== null && quoteIds.length > 0;
+  const enabled = isFullyConfigured && quoteIds.length > 0;
 
   const { data, refetch } = useReadContracts({
     contracts: quoteIds.map((quoteId) => ({
@@ -52,7 +53,7 @@ export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | 
   });
 
   const quotes = useMemo(() => {
-    if (!data || !pair) return [];
+    if (!data) return [];
     const list: Quote[] = [];
     (data ?? []).forEach((entry, i) => {
       const r = entry.result;
@@ -61,8 +62,10 @@ export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | 
         `0x${string}`, `0x${string}`, `0x${string}`, bigint, bigint, bigint, number, number, bigint, number,
       ];
       if (provider === "0x0000000000000000000000000000000000000000") return;
-      if (baseToken.toLowerCase() !== pair.base.toLowerCase()) return;
-      if (quoteToken.toLowerCase() !== pair.quote.toLowerCase()) return;
+      if (pair) {
+        if (baseToken.toLowerCase() !== pair.base.toLowerCase()) return;
+        if (quoteToken.toLowerCase() !== pair.quote.toLowerCase()) return;
+      }
       list.push({
         quoteId: quoteIds[i],
         provider,

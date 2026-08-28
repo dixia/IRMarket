@@ -4,9 +4,9 @@ import { useAccount, useBalance, useConnect, useDisconnect } from "wagmi";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { useBalances } from "@/hooks/useBalances";
 import { useHydrated } from "@/hooks/useHydrated";
-import { CHAIN_ID } from "@/lib/config";
-
-const MON_RESERVE_FLOOR = 10n * 10n ** 18n;
+import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useMemo } from "react";
+import { CHAIN_ID, MON_RESERVE_FLOOR, BASE_TOKEN_RAW, QUOTE_TOKEN_RAW } from "@/lib/config";
 
 export function WalletButton() {
   // Hydration-safe: renders the disconnected button until after hydration, so SSR HTML
@@ -18,6 +18,14 @@ export function WalletButton() {
   const balances = useBalances(mounted ? address : undefined);
   const { data: mon } = useBalance({ address: mounted ? address : undefined });
   const lowMon = mon !== undefined && mon.value < MON_RESERVE_FLOOR;
+
+  const tokenAddresses = useMemo(
+    () => [BASE_TOKEN_RAW, QUOTE_TOKEN_RAW].filter((a): a is `0x${string}` => !!a && a !== "0x"),
+    [],
+  );
+  const metaMap = useTokenMeta(tokenAddresses);
+  const baseDecimals = BASE_TOKEN_RAW ? (metaMap.get(BASE_TOKEN_RAW.toLowerCase())?.decimals ?? 18) : 18;
+  const quoteDecimals = QUOTE_TOKEN_RAW ? (metaMap.get(QUOTE_TOKEN_RAW.toLowerCase())?.decimals ?? 18) : 18;
 
   if (!mounted || !address) {
     return (
@@ -37,8 +45,8 @@ export function WalletButton() {
   return (
     <div className="flex items-center gap-2">
       <div className="hidden sm:flex flex-col items-end text-xs leading-tight">
-        <span className="text-text-dim">HKD {formatAmount(balances.hkd, 18, 2)}</span>
-        <span className="text-text-dim">LLM {formatAmount(balances.llm, 18, 2)}</span>
+        <span className="text-text-dim">HKD {formatAmount(balances.quote, quoteDecimals, 2)}</span>
+        <span className="text-text-dim">LLM {formatAmount(balances.base, baseDecimals, 2)}</span>
         <span className={lowMon ? "text-bear" : "text-text-dim"}>
           MON {formatAmount(mon?.value, 18, 2)}
         </span>

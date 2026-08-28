@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { MarketCard } from "@/components/market/MarketCard";
 import { TradePanel } from "@/components/trade/TradePanel";
 import { useMarkets } from "@/hooks/useMarkets";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { BlockCountdown } from "@/components/market/BlockCountdown";
 import { formatPrice } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
@@ -20,18 +21,35 @@ export default function TradePage() {
 
 function TradeContent() {
   const params = useSearchParams();
-  const m = Number(params.get("m") ?? "1");
+  const router = useRouter();
+  const m = Number(params.get("m") ?? "");
   const side = params.get("side");
   const markets = useMarkets();
 
   const market = useMemo(
-    () => markets.find((item) => Number(item.marketId) === m) ?? markets[0],
+    () => (m && !Number.isNaN(m) ? markets.find((item) => Number(item.marketId) === m) : undefined) ?? markets[0],
     [markets, m],
   );
+
+  const onMarketChange = (nextMarketId: string) => {
+    const current = new URLSearchParams(params.toString());
+    current.set("m", nextMarketId);
+    router.push(`?${current.toString()}`);
+  };
 
   const price = useReferencePrice(
     market && isFullyConfigured ? { base: market.baseToken, quote: market.quoteToken } : null,
   );
+
+  const metaMap = useTokenMeta(
+    market ? [market.baseToken, market.quoteToken] : [],
+  );
+  const baseMeta = market
+    ? (metaMap.get(market.baseToken.toLowerCase()) ?? { symbol: "LLM", decimals: 18 })
+    : { symbol: "LLM", decimals: 18 };
+  const quoteMeta = market
+    ? (metaMap.get(market.quoteToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
+    : { symbol: "HKD", decimals: 18 };
 
   if (!market) {
     return <p className="text-sm text-text-dim">Market not found.</p>;
@@ -42,11 +60,24 @@ function TradeContent() {
       {/* header */}
       <section>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold">{market.name}</h1>
             <span className="rounded-md bg-card-border/40 px-2 py-0.5 text-xs text-text-dim">
               {market.ticker}
             </span>
+            {markets.length > 1 && (
+              <select
+                className="rounded-lg border border-card-border bg-card px-2 py-1 text-xs"
+                value={market.marketId.toString()}
+                onChange={(e) => onMarketChange(e.target.value)}
+              >
+                {markets.map((item) => (
+                  <option key={item.marketId.toString()} value={item.marketId.toString()}>
+                    {item.name} ({item.ticker})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="text-right">
             <div className="text-xs text-text-dim">Expiry</div>
@@ -59,7 +90,7 @@ function TradeContent() {
             label="Current price"
             value={
               price.status === "ok"
-                ? `${formatPrice(price.price)} HKD`
+                ? `${formatPrice(price.price)} ${quoteMeta.symbol}/${baseMeta.symbol}`
                 : price.status === "settling"
                   ? "Settling"
                   : "—"

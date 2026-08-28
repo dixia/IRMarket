@@ -5,14 +5,10 @@ import { useReadContract, useWaitForTransactionReceipt, useWriteContract } from 
 import { maxUint256 } from "viem";
 import { ERC20_ABI, IRMARKET_ABI } from "@/lib/abis/market";
 import { MONORACLE_ABI } from "@/lib/abis/oracle";
-import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, ORACLE_ADDRESS, ORACLE_ADDRESS_RAW, QUOTE_TOKEN_RAW, BASE_TOKEN_RAW, hasWrapper, isFullyConfigured } from "@/lib/config";
+import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, ORACLE_ADDRESS_RAW, QUOTE_TOKEN_RAW, BASE_TOKEN_RAW, GAS_APPROVE, GAS_VETO, GAS_WRAPPER, hasWrapper, isFullyConfigured } from "@/lib/config";
 import type { Side } from "@/lib/types";
 
 export type TradeKind = "open" | "close";
-
-export const GAS_APPROVE = 60_000n;
-export const GAS_VETO = 300_000n;
-export const GAS_WRAPPER = 450_000n;
 
 interface TradeRequest {
   side: Side;
@@ -119,7 +115,7 @@ export function useTrade(
       });
     } else {
       trade.writeContract({
-        address: ORACLE_ADDRESS as `0x${string}`,
+        address: ORACLE_ADDRESS_RAW as `0x${string}`,
         abi: MONORACLE_ABI,
         functionName: (request.side === "bull" ? "vetoUnderpriced" : "vetoOverpriced") as "vetoUnderpriced" | "vetoOverpriced",
         args: [request.quoteId],
@@ -171,12 +167,16 @@ export function useAllowance(token: string, owner: `0x${string}` | undefined, sp
 }
 
 /** Resolve the payable asset + spender for a side/kind (opens via wrapper, closes direct). */
-export function payableFor(side: Side, kind: TradeKind, marketIdEnabled: boolean) {
+export function payableFor(
+  side: Side,
+  kind: TradeKind,
+  marketIdEnabled: boolean,
+  market?: { baseToken: `0x${string}`; quoteToken: `0x${string}` },
+) {
   const viaWrapper = hasWrapper && kind === "open" && marketIdEnabled;
   const spender = viaWrapper ? (MARKET_ADDRESS_RAW as `0x${string}`) : (ORACLE_ADDRESS_RAW as `0x${string}`);
-  // HKD for long, LLM for short.
   const token = side === "bull"
-    ? QUOTE_TOKEN_RAW
-    : BASE_TOKEN_RAW;
+    ? (market?.quoteToken ?? QUOTE_TOKEN_RAW)
+    : (market?.baseToken ?? BASE_TOKEN_RAW);
   return { token: token as `0x${string}`, spender };
 }

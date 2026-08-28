@@ -10,6 +10,7 @@ import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { PositionCard, computePositionValuation } from "@/components/position/PositionCard";
 import { ClosePanel } from "@/components/position/ClosePanel";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { isFullyConfigured } from "@/lib/config";
 import type { Position } from "@/lib/types";
 
@@ -26,15 +27,11 @@ export default function PositionsPage() {
   );
 
   const { positions, refetch } = usePositions(account);
-  const priceState = useReferencePrice(pair);
   const blockNumber = useCurrentBlock();
-  const { activeQuotes } = useQuotes(pair);
+  const { quotes: allQuotes } = useQuotes(null);
 
   const [tab, setTab] = useState<"open" | "settled">("open");
   const [closing, setClosing] = useState<Position | null>(null);
-
-  const mark = priceState.status === "ok" ? priceState.price : undefined;
-  const settling = priceState.status === "settling";
 
   const isExpired = (p: Position) => blockNumber !== undefined && p.expiryBlock < blockNumber;
 
@@ -43,13 +40,50 @@ export default function PositionsPage() {
 
   const visible = tab === "open" ? openPositions : settledPositions;
 
+  const activePairSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const q of allQuotes) {
+      if (q.status !== 0) continue;
+      if (blockNumber !== undefined && q.expiryBlock < blockNumber) continue;
+      s.add(`${q.baseToken.toLowerCase()}-${q.quoteToken.toLowerCase()}`);
+    }
+    return s;
+  }, [allQuotes, blockNumber]);
+
   const canClose = (p: Position) =>
-    !isExpired(p) && activeQuotes.some((q) => q.expiryBlock >= (blockNumber ?? 0n));
+    !isExpired(p) && activePairSet.has(`${p.baseToken.toLowerCase()}-${p.quoteToken.toLowerCase()}`);
+
+  const priceByPair = useMemo(() => {
+    const map = new Map<string, bigint>();
+    for (const q of allQuotes) {
+      if (q.status !== 0) continue;
+      if (blockNumber !== undefined && q.expiryBlock < blockNumber) continue;
+      const key = `${q.baseToken.toLowerCase()}-${q.quoteToken.toLowerCase()}`;
+      map.set(key, q.price);
+    }
+    return map;
+  }, [allQuotes, blockNumber]);
 
   const totalPnl = openPositions.reduce((sum, p) => {
+    const pairKey = `${p.baseToken.toLowerCase()}-${p.quoteToken.toLowerCase()}`;
+    const mark = priceByPair.get(pairKey);
     const v = computePositionValuation(p, mark);
     return sum + (v.pnl ?? 0n);
   }, 0n);
+
+  const priceState = useReferencePrice(pair, {
+    quotes: pair ? allQuotes.filter((q) => q.baseToken.toLowerCase() === pair.base.toLowerCase() && q.quoteToken.toLowerCase() === pair.quote.toLowerCase()) : [],
+    activeQuotes: pair ? allQuotes.filter((q) => q.baseToken.toLowerCase() === pair.base.toLowerCase() && q.quoteToken.toLowerCase() === pair.quote.toLowerCase() && q.status === 0 && (blockNumber === undefined || q.expiryBlock >= blockNumber)) : [],
+  });
+  const settling = priceState.status === "settling";
+
+  // Resolve symbols for the displayed market (used in PnL label and ClosePanel).
+  const metaMap = useTokenMeta(
+    market ? [market.baseToken, market.quoteToken] : [],
+  );
+  const quoteMeta = market
+    ? (metaMap.get(market.quoteToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
+    : { symbol: "HKD", decimals: 18 };
 
   if (!isFullyConfigured) {
     return (
@@ -74,7 +108,7 @@ export default function PositionsPage() {
             <div className="text-xs text-text-dim">Open PnL</div>
             <div className={`text-lg font-bold ${totalPnl >= 0n ? "text-bull" : "text-bear"}`}>
               {totalPnl >= 0n ? "+" : ""}
-              {(Number(totalPnl) / 10 ** 18).toFixed(2)} HKD
+              {(Number(totalPnl) / 10 ** 18).toFixed(2)} {quoteMeta.symbol}
             </div>
           </div>
           <button
@@ -109,8 +143,8 @@ export default function PositionsPage() {
           {closing && (
             <ClosePanel
               position={closing}
-              baseToken={market?.baseToken}
-              quoteToken={market?.quoteToken}
+              baseToken={closing.baseToken}
+              quoteToken={closing.quoteToken}
               onClosed={() => setClosing(null)}
             />
           )}
@@ -127,16 +161,20 @@ export default function PositionsPage() {
             </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {visible.map((p) => (
-                <PositionCard
-                  key={p.id}
-                  position={p}
-                  price={mark}
-                  settling={settling}
-                  canClose={canClose(p)}
-                  onClose={(pos) => setClosing(pos)}
-                />
-              ))}
+              {visible.map((p) => {
+                const pairKey = `${p.baseToken.toLowerCase()}-${p.quoteToken.toLowerCase()}`;
+                const positionMark = priceByPair.get(pairKey);
+                return (
+                  <PositionCard
+                    key={p.id}
+                    position={p}
+                    price={positionMark}
+                    settling={settling}
+                    canClose={canClose(p)}
+                    onClose={(pos) => setClosing(pos)}
+                  />
+                );
+              })}
             </div>
           )}
         </>

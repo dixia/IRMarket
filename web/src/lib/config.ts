@@ -25,13 +25,18 @@ export const BASE_TOKEN = BASE_TOKEN_RAW as `0x${string}`;
 export const QUOTE_TOKEN_RAW = process.env.NEXT_PUBLIC_QUOTE_TOKEN || "";
 export const QUOTE_TOKEN = QUOTE_TOKEN_RAW as `0x${string}`;
 
-export const DEMO_MARKET_ID = BigInt(process.env.NEXT_PUBLIC_DEMO_MARKET_ID || "1");
 export const EXPIRY_SECONDS = Number(process.env.NEXT_PUBLIC_EXPIRY_SECONDS || 3 * 60);
 
 export const isFullyConfigured =
   ORACLE_ADDRESS_RAW !== "" && BASE_TOKEN_RAW !== "" && QUOTE_TOKEN_RAW !== "";
 
 export const hasWrapper = MARKET_ADDRESS_RAW !== "";
+
+export const GAS_APPROVE = 60_000n;
+export const GAS_VETO = 300_000n;
+export const GAS_WRAPPER = 450_000n;
+export const FAUCET_AMOUNT = 2000n * 10n ** 18n;
+export const MON_RESERVE_FLOOR = 10n * 10n ** 18n;
 
 export function explorerTxUrl(hash: string): string {
   return `${EXPLORER_BASE}/tx/${hash}`;

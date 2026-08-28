@@ -32,7 +32,7 @@ interface RawLog {
 async function readQuote(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
   quoteId: bigint,
-): Promise<{ price: bigint; baseAmount: bigint; quoteAmount: bigint; expiryBlock: bigint; provider: `0x${string}` } | null> {
+): Promise<{ price: bigint; baseAmount: bigint; quoteAmount: bigint; expiryBlock: bigint; provider: `0x${string}`; baseToken: `0x${string}`; quoteToken: `0x${string}` } | null> {
   const q = await publicClient
     .readContract({
       address: ORACLE_ADDRESS as `0x${string}`,
@@ -42,10 +42,12 @@ async function readQuote(
     })
     .catch(() => null);
   if (!q) return null;
-  const [provider, , , baseAmount, quoteAmount, price, , , expiryBlock] = q as readonly unknown[];
+  const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, , , expiryBlock] = q as readonly unknown[];
   if (provider === getAddress("0x0000000000000000000000000000000000000000")) return null;
   return {
     provider: provider as `0x${string}`,
+    baseToken: baseToken as `0x${string}`,
+    quoteToken: quoteToken as `0x${string}`,
     baseAmount: baseAmount as bigint,
     quoteAmount: quoteAmount as bigint,
     price: price as bigint,
@@ -145,6 +147,8 @@ export function usePositions(address: `0x${string}` | undefined) {
             id: `wrapped-${quoteId.toString()}`,
             side: s,
             marketId: marketId as bigint,
+            baseToken: q.baseToken,
+            quoteToken: q.quoteToken,
             quoteId: quoteId as bigint,
             openPrice: q.price,
             heldBase: s === "bull" ? swapOut : 0n,
@@ -182,6 +186,8 @@ export function usePositions(address: `0x${string}` | undefined) {
           id: `vetoed-${args.quoteId.toString()}`,
           side,
           marketId: null,
+          baseToken: q.baseToken,
+          quoteToken: q.quoteToken,
           quoteId: args.quoteId,
           openPrice: q.price,
           heldBase: side === "bull" ? q.baseAmount : 0n,

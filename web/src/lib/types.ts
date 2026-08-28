@@ -32,6 +32,8 @@ export interface Position {
   id: string;
   side: Side;
   marketId: bigint | null;
+  baseToken: `0x${string}`;
+  quoteToken: `0x${string}`;
   quoteId: bigint;
   openPrice: bigint; // locked quote price at entry (1e18)
   // bull (long): receives baseAmount (LLM), posted quoteAmount + fee (HKD)

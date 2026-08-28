@@ -6,7 +6,7 @@ import { useQuotes } from "./useQuotes";
 import { useMemo } from "react";
 import { useCurrentBlock } from "./useCurrentBlock";
 import { ORACLE_ADDRESS, isFullyConfigured } from "@/lib/config";
-import type { PriceState } from "@/lib/types";
+import type { PriceState, Quote } from "@/lib/types";
 
 /**
  * Reference price for a pair.
@@ -16,8 +16,14 @@ import type { PriceState } from "@/lib/types";
  *   final quote (D-06/B12). Until then the previous round's value persists → show a
  *   「终价结算中（等待 settle）」 transient (E4) instead of a stale number.
  */
-export function useReferencePrice(pair: { base: `0x${string}`; quote: `0x${string}` } | null) {
-  const { quotes, activeQuotes, nextQuoteId } = useQuotes(pair);
+export function useReferencePrice(
+  pair: { base: `0x${string}`; quote: `0x${string}` } | null,
+  opts?: { quotes?: Quote[]; activeQuotes?: Quote[] },
+) {
+  const internal = useQuotes(pair);
+  const quotes = opts?.quotes ?? internal.quotes;
+  const activeQuotes = opts?.activeQuotes ?? internal.activeQuotes;
+  const nextQuoteId = internal.nextQuoteId;
   const blockNumber = useCurrentBlock();
 
   const latestPrice = useReadContract({

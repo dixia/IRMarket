@@ -8,6 +8,7 @@ import { useMarkets } from "@/hooks/useMarkets";
 import { useBalances } from "@/hooks/useBalances";
 import { useHydrated } from "@/hooks/useHydrated";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatAmount } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
 
@@ -15,10 +16,20 @@ export default function HomePage() {
   const mounted = useHydrated();
   const { address } = useAccount();
   const markets = useMarkets();
-  const balances = useBalances(mounted ? address : undefined);
+  const market = markets.length > 0 ? markets[0] : undefined;
+  const tokens = market ? { base: market.baseToken, quote: market.quoteToken } : null;
+  const balances = useBalances(mounted ? address : undefined, tokens);
+  const metaMap = useTokenMeta(
+    market ? [market.baseToken, market.quoteToken] : [],
+  );
+  const baseMeta = market
+    ? (metaMap.get(market.baseToken.toLowerCase()) ?? { symbol: "LLM", decimals: 18 })
+    : { symbol: "LLM", decimals: 18 };
+  const quoteMeta = market
+    ? (metaMap.get(market.quoteToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
+    : { symbol: "HKD", decimals: 18 };
   const [faucetOpen, setFaucetOpen] = useState(false);
 
-  const market = markets.length > 0 ? markets[0] : undefined;
   const price = useReferencePrice(
     market && isFullyConfigured ? { base: market.baseToken, quote: market.quoteToken } : null,
   );
@@ -48,9 +59,9 @@ export default function HomePage() {
           </button>
           {mounted && address && (
             <span className="text-text-dim">
-              Wallet balance · HKD <span className="text-primary">{formatAmount(balances.hkd, 18, 2)}</span>
+              Wallet balance · {quoteMeta.symbol} <span className="text-primary">{formatAmount(balances.quote, quoteMeta.decimals, 2)}</span>
               {"  ·  "}
-              LLM <span className="text-primary">{formatAmount(balances.llm, 18, 2)}</span>
+              {baseMeta.symbol} <span className="text-primary">{formatAmount(balances.base, baseMeta.decimals, 2)}</span>
             </span>
           )}
         </div>

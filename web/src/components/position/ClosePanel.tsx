@@ -8,6 +8,7 @@ import { useQuotes } from "@/hooks/useQuotes";
 import { useBalances } from "@/hooks/useBalances";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { useAllowance, payableFor, useTrade, TradeKind } from "@/hooks/useTrade";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { TxStatusCard, mapTransactionError, TxState } from "@/components/common/TxStatusCard";
 
 /**
@@ -29,13 +30,17 @@ export function ClosePanel({
   const { address } = useAccount();
   const { activeQuotes } = useQuotes(baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null);
   const blockNumber = useCurrentBlock();
-  const balances = useBalances(address);
+  const tokens = baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null;
+  const balances = useBalances(address, tokens);
+  const metaMap = useTokenMeta([baseToken ?? "0x", quoteToken ?? "0x"]);
+  const baseMeta = baseToken ? (metaMap.get(baseToken.toLowerCase()) ?? { symbol: "???", decimals: 18 }) : { symbol: "???", decimals: 18 };
+  const quoteMeta = quoteToken ? (metaMap.get(quoteToken.toLowerCase()) ?? { symbol: "???", decimals: 18 }) : { symbol: "???", decimals: 18 };
 
   const active = activeQuotes.filter((q) => blockNumber === undefined || q.expiryBlock >= blockNumber);
   const selected: Quote | undefined = active.length > 0 ? active[active.length - 1] : undefined;
 
-  // Reverse direction: closing a bull (holds LLM) = vetoOverpriced (short); closing a
-  // bear (holds HKD) = vetoUnderpriced (long).
+  // Reverse direction: closing a bull (holds base) = vetoOverpriced (short); closing a
+  // bear (holds quote) = vetoUnderpriced (long).
   const closeSide: Side = position.side === "bull" ? "bear" : "bull";
 
   const payAmount = useMemo(
@@ -47,6 +52,11 @@ export function ClosePanel({
     [selected, closeSide],
   );
 
+  const payDecimals = closeSide === "bull" ? quoteMeta.decimals : baseMeta.decimals;
+  const paySymbol = closeSide === "bull" ? quoteMeta.symbol : baseMeta.symbol;
+  const receiveDecimals = closeSide === "bull" ? baseMeta.decimals : quoteMeta.decimals;
+  const receiveSymbol = closeSide === "bull" ? baseMeta.symbol : quoteMeta.symbol;
+
   // E3: short received quoteAmount − fee HKD at open; closing pays full quoteAmount HKD.
   const shortfall = useMemo(() => {
     if (closeSide !== "bull" || !selected) return 0n;
@@ -54,7 +64,8 @@ export function ClosePanel({
     return selected.quoteAmount > held ? selected.quoteAmount - held : 0n;
   }, [closeSide, selected, position.heldQuote]);
 
-  const payable = payableFor(closeSide, "close", false);
+  const marketCtx = baseToken && quoteToken ? { baseToken, quoteToken } : undefined;
+  const payable = payableFor(closeSide, "close", false, marketCtx);
   const { data: allowance } = useAllowance(payable.token, address, payable.spender);
 
   const request = useMemo(() => {
@@ -71,7 +82,8 @@ export function ClosePanel({
 
   const trade = useTrade(request, allowance as bigint | undefined);
 
-  const balanceFor = closeSide === "bull" ? balances.hkd : balances.llm;
+  const balanceFor = closeSide === "bull" ? balances.quote : balances.base;
+  const balanceDecimals = closeSide === "bull" ? quoteMeta.decimals : baseMeta.decimals;
   const insufficient = balanceFor !== undefined && balanceFor < payAmount;
 
   const txState: TxState = useMemo(() => {
@@ -125,15 +137,15 @@ export function ClosePanel({
           <div className="mt-3 rounded-lg bg-primary/5 p-3 text-sm space-y-1">
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Fill price</span>
-              <span>{formatPrice(selected.price)} HKD/LLM</span>
+              <span>{formatPrice(selected.price)} {quoteMeta.symbol}/{baseMeta.symbol}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Pay</span>
-              <span>{formatAmount(payAmount, 18, 4)} {closeSide === "bull" ? "HKD" : "LLM"}</span>
+              <span>{formatAmount(payAmount, payDecimals, 4)} {paySymbol}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Receive</span>
-              <span>{formatAmount(receiveAmount, 18, 4)} {closeSide === "bull" ? "LLM" : "HKD"}</span>
+              <span>{formatAmount(receiveAmount, receiveDecimals, 4)} {receiveSymbol}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Fee</span>
@@ -142,13 +154,13 @@ export function ClosePanel({
             {shortfall > 0n && (
               <div className="flex justify-between gap-6 font-semibold text-bear">
                 <span>Top-up required (fee deducted at open)</span>
-                <span>{formatAmount(shortfall, 18, 4)} HKD</span>
+                <span>{formatAmount(shortfall, quoteMeta.decimals, 4)} {quoteMeta.symbol}</span>
               </div>
             )}
           </div>
 
           <div className="mt-2 flex justify-between text-xs text-text-dim">
-            <span>Available {closeSide === "bull" ? "HKD" : "LLM"} balance: {formatAmount(balanceFor, 18, 4)}</span>
+            <span>Available {paySymbol} balance: {formatAmount(balanceFor, balanceDecimals, 4)}</span>
             {insufficient && <span className="text-bear">Insufficient balance</span>}
           </div>
 

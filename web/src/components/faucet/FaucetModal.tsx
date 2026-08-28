@@ -4,10 +4,8 @@ import { useCallback, useState } from "react";
 import { useAccount } from "wagmi";
 import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ERC20_ABI } from "@/lib/abis/market";
-import { BASE_TOKEN, QUOTE_TOKEN, isFullyConfigured } from "@/lib/config";
+import { BASE_TOKEN, QUOTE_TOKEN, FAUCET_AMOUNT, isFullyConfigured } from "@/lib/config";
 import { formatAmount } from "@/lib/format";
-
-const FAUCET_AMOUNT = 2000n * 10n ** 18n;
 
 /**
  * Demo faucet: mints LLM + HKD directly to the connected account via public MockERC20.mint.

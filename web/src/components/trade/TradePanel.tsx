@@ -8,11 +8,26 @@ import { useQuotes } from "@/hooks/useQuotes";
 import { useBalances } from "@/hooks/useBalances";
 import { useHydrated } from "@/hooks/useHydrated";
 import { useAllowance, payableFor, useTrade, TradeKind } from "@/hooks/useTrade";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { TxStatusCard, mapTransactionError, TxState } from "@/components/common/TxStatusCard";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { isFullyConfigured } from "@/lib/config";
 
-function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint | undefined }) {
+function QuoteCard({
+  quote,
+  blockNumber,
+  baseSymbol,
+  quoteSymbol,
+  baseDecimals,
+  quoteDecimals,
+}: {
+  quote: Quote;
+  blockNumber: bigint | undefined;
+  baseSymbol: string;
+  quoteSymbol: string;
+  baseDecimals: number;
+  quoteDecimals: number;
+}) {
   const expired = blockNumber !== undefined && quote.expiryBlock < blockNumber;
   return (
     <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
@@ -27,10 +42,10 @@ function QuoteCard({ quote, blockNumber }: { quote: Quote; blockNumber: bigint |
         )}
       </div>
       <div className="mt-1 text-2xl font-bold text-primary">
-        {formatPrice(quote.price)} HKD/LLM
+        {formatPrice(quote.price)} {quoteSymbol}/{baseSymbol}
       </div>
       <div className="mt-1 text-xs text-text-dim">
-        Quote size (all-or-nothing): pay {formatAmount(quote.quoteAmount, 18, 4)} HKD / receive {formatAmount(quote.baseAmount, 18, 4)} LLM
+        Quote size (all-or-nothing): pay {formatAmount(quote.quoteAmount, quoteDecimals, 4)} {quoteSymbol} / receive {formatAmount(quote.baseAmount, baseDecimals, 4)} {baseSymbol}
       </div>
     </div>
   );
@@ -54,7 +69,12 @@ export function TradePanel({
   const account = mounted ? address : undefined;
   const { activeQuotes } = useQuotes(baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null);
   const blockNumber = useCurrentBlock();
-  const balances = useBalances(account);
+  const tokens = baseToken && quoteToken ? { base: baseToken, quote: quoteToken } : null;
+  const balances = useBalances(account, tokens);
+  const metaMap = useTokenMeta([baseToken ?? "0x", quoteToken ?? "0x"]);
+  const baseMeta = useMemo(() => baseToken ? (metaMap.get(baseToken.toLowerCase()) ?? { symbol: "???", decimals: 18 }) : { symbol: "???", decimals: 18 }, [baseToken, metaMap]);
+  const quoteMeta = useMemo(() => quoteToken ? (metaMap.get(quoteToken.toLowerCase()) ?? { symbol: "???", decimals: 18 }) : { symbol: "???", decimals: 18 }, [quoteToken, metaMap]);
+
   // null until the user picks a tab; then it locks in (route side only pre-selects).
   const [manualSide, setManualSide] = useState<Side | null>(null);
   const side: Side = manualSide ?? initialSide ?? "bull";
@@ -68,26 +88,33 @@ export function TradePanel({
     const fee = computeFee(selected.quoteAmount, feeBps);
     if (side === "bull") {
       return {
-        payLabel: "HKD",
+        payLabel: quoteMeta.symbol,
         payAmount: selected.quoteAmount + fee,
-        receiveLabel: "LLM",
+        payDecimals: quoteMeta.decimals,
+        receiveLabel: baseMeta.symbol,
         receiveAmount: selected.baseAmount,
+        receiveDecimals: baseMeta.decimals,
         fee,
         maxLoss: selected.quoteAmount + fee,
+        maxLossDecimals: quoteMeta.decimals,
       };
     }
     return {
-      payLabel: "LLM",
+      payLabel: baseMeta.symbol,
       payAmount: selected.baseAmount,
-      receiveLabel: "HKD",
+      payDecimals: baseMeta.decimals,
+      receiveLabel: quoteMeta.symbol,
       receiveAmount: selected.quoteAmount - fee,
+      receiveDecimals: quoteMeta.decimals,
       fee,
       maxLoss: selected.baseAmount,
+      maxLossDecimals: baseMeta.decimals,
     };
-  }, [selected, side, feeBps]);
+  }, [selected, side, feeBps, baseMeta, quoteMeta]);
 
   // allowance gating
-  const payable = payableFor(side, "open", true);
+  const marketCtx = baseToken && quoteToken ? { baseToken, quoteToken } : undefined;
+  const payable = payableFor(side, "open", true, marketCtx);
   const { data: allowance } = useAllowance(payable.token, account, payable.spender);
   const requiredAmount = preview?.payAmount ?? 0n;
 
@@ -106,7 +133,7 @@ export function TradePanel({
 
   const trade = useTrade(request, allowance as bigint | undefined);
 
-  const balanceFor = side === "bull" ? balances.hkd : balances.llm;
+  const balanceFor = side === "bull" ? balances.quote : balances.base;
   const insufficientBalance = preview !== null && balanceFor !== undefined && balanceFor < preview.payAmount;
 
   const txState: TxState = useMemo(() => {
@@ -162,7 +189,14 @@ export function TradePanel({
 
       {isFullyConfigured && selected && (
         <div className="mt-3">
-          <QuoteCard quote={selected} blockNumber={blockNumber} />
+          <QuoteCard
+            quote={selected}
+            blockNumber={blockNumber}
+            baseSymbol={baseMeta.symbol}
+            quoteSymbol={quoteMeta.symbol}
+            baseDecimals={baseMeta.decimals}
+            quoteDecimals={quoteMeta.decimals}
+          />
 
           {/* tabs */}
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -188,15 +222,15 @@ export function TradePanel({
           <div className="mt-3 rounded-lg bg-card-border/20 p-3 text-sm space-y-1">
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Pay</span>
-              <span>{preview ? formatAmount(preview.payAmount, 18, 4) : "—"} {preview?.payLabel}</span>
+              <span>{preview ? formatAmount(preview.payAmount, preview.payDecimals, 4) : "—"} {preview?.payLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Receive</span>
-              <span>{preview ? formatAmount(preview.receiveAmount, 18, 4) : "—"} {preview?.receiveLabel}</span>
+              <span>{preview ? formatAmount(preview.receiveAmount, preview.receiveDecimals, 4) : "—"} {preview?.receiveLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Fee ({Number(feeBps) / 100}%)</span>
-              <span>{preview ? formatAmount(preview.fee, 18, 4) : "—"} HKD</span>
+              <span>{preview ? formatAmount(preview.fee, preview.payDecimals, 4) : "—"} {preview?.payLabel}</span>
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Fill price</span>
@@ -204,12 +238,12 @@ export function TradePanel({
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Max loss</span>
-              <span className="text-bear">{preview ? formatAmount(preview.maxLoss, 18, 4) : "—"}</span>
+              <span className="text-bear">{preview ? formatAmount(preview.maxLoss, preview.maxLossDecimals, 4) : "—"}</span>
             </div>
           </div>
 
           <div className="mt-2 flex justify-between text-xs text-text-dim">
-            <span>{side === "bull" ? "Available HKD balance" : "Available LLM balance"}: {formatAmount(balanceFor, 18, 4)}</span>
+            <span>Available {side === "bull" ? quoteMeta.symbol : baseMeta.symbol} balance: {formatAmount(balanceFor, side === "bull" ? quoteMeta.decimals : baseMeta.decimals, 4)}</span>
             {insufficientBalance && <span className="text-bear">Insufficient balance</span>}
           </div>
 
