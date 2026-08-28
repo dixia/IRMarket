@@ -14,6 +14,8 @@ export function MarketCard({
 }) {
   const href = `/trade?m=${market.marketId.toString()}`;
 
+  const quoteSymbol = market.ticker.split("/")[1] || market.ticker;
+
   return (
     <div className="block rounded-xl border border-card-border bg-card p-4 transition-colors hover:border-primary/40">
       <Link href={href} className="group block">
@@ -29,7 +31,7 @@ export function MarketCard({
 
         <div className="mt-3 flex items-end justify-between">
           <div>
-            <div className="text-xs text-text-dim">Current price (HKD)</div>
+            <div className="text-xs text-text-dim">Current price ({quoteSymbol})</div>
             <div className="text-2xl font-bold text-primary">
               {formatPrice(price)}
             </div>

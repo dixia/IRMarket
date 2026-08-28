@@ -6,6 +6,7 @@ import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ERC20_ABI } from "@/lib/abis/market";
 import { BASE_TOKEN, QUOTE_TOKEN, FAUCET_AMOUNT, isFullyConfigured } from "@/lib/config";
 import { formatAmount } from "@/lib/format";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 /**
  * Demo faucet: mints LLM + HKD directly to the connected account via public MockERC20.mint.
@@ -14,6 +15,11 @@ import { formatAmount } from "@/lib/format";
 export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { address } = useAccount();
   const [target, setTarget] = useState(address ?? "");
+
+  const tokenAddresses = [BASE_TOKEN, QUOTE_TOKEN].filter((a): a is `0x${string}` => !!a && a !== "0x");
+  const metaMap = useTokenMeta(tokenAddresses);
+  const baseMeta = BASE_TOKEN ? (metaMap.get(BASE_TOKEN.toLowerCase()) ?? { symbol: "LLM", decimals: 18 }) : { symbol: "LLM", decimals: 18 };
+  const quoteMeta = QUOTE_TOKEN ? (metaMap.get(QUOTE_TOKEN.toLowerCase()) ?? { symbol: "HKD", decimals: 18 }) : { symbol: "HKD", decimals: 18 };
 
   const mintBase = useWriteContract();
   const mintQuote = useWriteContract();
@@ -54,8 +60,8 @@ export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => v
         ) : (
           <>
             <p className="mt-2 text-sm text-text-dim">
-              Claim <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} LLM</span> and{" "}
-              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, 18, 0)} HKD</span> for free (test tokens to try out trading).
+              Claim <span className="text-primary">{formatAmount(FAUCET_AMOUNT, baseMeta.decimals, 0)} {baseMeta.symbol}</span> and{" "}
+              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, quoteMeta.decimals, 0)} {quoteMeta.symbol}</span> for free (test tokens to try out trading).
             </p>
 
             <label className="mt-4 block text-xs text-text-dim">Recipient address</label>

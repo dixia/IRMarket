@@ -26,6 +26,8 @@ export function WalletButton() {
   const metaMap = useTokenMeta(tokenAddresses);
   const baseDecimals = BASE_TOKEN_RAW ? (metaMap.get(BASE_TOKEN_RAW.toLowerCase())?.decimals ?? 18) : 18;
   const quoteDecimals = QUOTE_TOKEN_RAW ? (metaMap.get(QUOTE_TOKEN_RAW.toLowerCase())?.decimals ?? 18) : 18;
+  const baseSymbol = BASE_TOKEN_RAW ? (metaMap.get(BASE_TOKEN_RAW.toLowerCase())?.symbol ?? "LLM") : "LLM";
+  const quoteSymbol = QUOTE_TOKEN_RAW ? (metaMap.get(QUOTE_TOKEN_RAW.toLowerCase())?.symbol ?? "HKD") : "HKD";
 
   if (!mounted || !address) {
     return (
@@ -45,8 +47,8 @@ export function WalletButton() {
   return (
     <div className="flex items-center gap-2">
       <div className="hidden sm:flex flex-col items-end text-xs leading-tight">
-        <span className="text-text-dim">HKD {formatAmount(balances.quote, quoteDecimals, 2)}</span>
-        <span className="text-text-dim">LLM {formatAmount(balances.base, baseDecimals, 2)}</span>
+        <span className="text-text-dim">{quoteSymbol} {formatAmount(balances.quote, quoteDecimals, 2)}</span>
+        <span className="text-text-dim">{baseSymbol} {formatAmount(balances.base, baseDecimals, 2)}</span>
         <span className={lowMon ? "text-bear" : "text-text-dim"}>
           MON {formatAmount(mon?.value, 18, 2)}
         </span>
