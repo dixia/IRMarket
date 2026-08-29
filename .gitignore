@@ -27,6 +27,7 @@ bot/.venv/
 __pycache__/
 web/.vercel/
 web/test-results/
+web/tests/helpers/addresses.json
 
 dev_error.txt
 dev_output.txt
