@@ -23,9 +23,9 @@ This repo build on top of the Monoracle project (`github.com/dixia/monoracle`).
 | `test/` | Hardhat test suite |
 | `bot/` | Python verification/settlement bot |
 | `web/` | Next.js frontend dapp |
-| `docs/` | Workflows + DeltaV records (some gitignored) |
-| `plan/` | Roadmap |
-| `product/` | Product analysis, USP, comparisons (GTM.md gitignored) |
+| `docs/` | Design docs, product docs, workflows, DeltaV records (some gitignored) |
+| `docs/product/` | Product requirements (PRD), demo scripts, work logs |
+| `docs/design/` | Smart contract tech spec, web tech design |
 
 
 
@@ -43,8 +43,8 @@ cd web && npm install && npx next dev -p 3000  # frontend
 ### Architecture at a glance
 Monad veto-arbitrage 长/短市场：
 - 长 = `vetoUnderpriced`（付 HKD 收 LLM），短 = `vetoOverpriced`；多空 = Monoracle veto 方向，勿用传统订单簿语义。
-- `contracts/Monoracle.sol` = 上游 Monoracle 的分叉（per-quote `expiryBlock`，验证窗口 = 期权到期，已取代 2-slot 假设；勿再引入上游 Monoracle 全文）。**已废弃，见 `TODO.md`**。
 - `contracts/IRMarket.sol` = 1% HKD fee wrapper：`openLong/openShort(marketId, quoteId)`。
+- 上游 `Monoracle.sol`（`github.com/dixia/monoracle`）提供 quoting + veto + settlement；本 repo 不 vendoring 上游代码，仅通过 `contracts/IMonoracle.sol` 接口调用。
 
 ### Commit & hygiene
 - 提交前必扫硬编码密钥（`rg` hex `0x…{40}`、`PRIVATE_KEY`）；密钥只从 env 读取，禁止拼接/硬编码。

@@ -12,7 +12,7 @@
 - [ ] Define exotic option market scope (underlyings: A-share, Labubu, any priced asset)
 - [ ] Settlement design on the Monoracle veto-arbitrage primitive
 - [ ] Collateral mechanics (bilateral / asymmetric)
-- [ ] Fill `requirement.md`, `tech-spec.md`, `product/*`
+ - [ ] Fill `requirement.md`, `tech-spec.md`, `docs/product/*`
 
 ## M2 — Contracts & tests
 
