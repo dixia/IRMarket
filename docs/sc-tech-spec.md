@@ -6,12 +6,12 @@
 > thin factory + fee wrapper.
 >
 > **V0.9 change:** the veto window is now aligned with the option expiry (D-13). This required
-> a fork of the upstream Monoracle contract (`contracts/MonoracleWindowed.sol`, derived from
+> a fork of the upstream Monoracle contract (`contracts/Monoracle.sol`, derived from
 > `github.com/dixia/monoracle`) because upstream hard-codes `VERIFICATION_SLOTS = 2`. The fork
 > is the only contract-code exception to the "no vendored Monoracle code" rule (user-approved).
 >
 > **Deprecation (CWV-01):** upstream `github.com/dixia/monoracle` has since merged the per-quote
-> `expiryBlock` requirement into its main contract. `contracts/MonoracleWindowed.sol` now carries
+> `expiryBlock` requirement into its main contract. `contracts/Monoracle.sol` now carries
 > a DEPRECATED marker and is kept deployed only until the upstream testnet deployment lands
 > (see TODO.md / GH issue #2). This spec documents the deployed V0.9 fork; alignment to the
 > upstream-main contract is tracked as CWV-01.
@@ -26,16 +26,16 @@
 ### 1.1 What the IRMarket contract is (and is not)
 
 IRMarket does **NOT** price, match, settle, or hold pools. The whole trade lifecycle lives in
-**MonoracleWindowed** (the IRMarket-deployed fork of Monoracle — users operate the *same*
+**Monoracle** (the IRMarket-deployed fork of Monoracle — users operate the *same*
 contract that quotes and settles):
 
 | Capability | Owner | Entry points |
 |---|---|---|
-| Quoting + bilateral collateral + quote ledger | 🔁 MonoracleWindowed | `submitQuote(..., expiryBlock)`, `quotes`, `QuoteSubmitted` |
-| **Trade matching** (go long / go short) | 🔁 MonoracleWindowed | `vetoUnderpriced` / `vetoOverpriced` |
-| **Settlement** (asset swap, immediate) | 🔁 MonoracleWindowed | done inside the veto tx — no second step |
-| **Verification window = option expiry** | 🔁 MonoracleWindowed | per-quote `expiryBlock` (D-13) |
-| Canonical price / read | 🔁 MonoracleWindowed | `settleValidQuote` / `getLatestPrice` |
+| Quoting + bilateral collateral + quote ledger | 🔁 Monoracle | `submitQuote(..., expiryBlock)`, `quotes`, `QuoteSubmitted` |
+| **Trade matching** (go long / go short) | 🔁 Monoracle | `vetoUnderpriced` / `vetoOverpriced` |
+| **Settlement** (asset swap, immediate) | 🔁 Monoracle | done inside the veto tx — no second step |
+| **Verification window = option expiry** | 🔁 Monoracle | per-quote `expiryBlock` (D-13) |
+| Canonical price / read | 🔁 Monoracle | `settleValidQuote` / `getLatestPrice` |
 | **Market factory (registry)** | IRMarket (thin) | `createMarket(base, quote, marketMaker, expiryBlock, feeBps)` — **no pair dedup** (D-14) |
 | **Fee wrapper (1%, in HKD)** | IRMarket (thin) | `openLong` / `openShort` = veto + explicit fee (D-11/D-16) |
 | Position index / valuation | IRMarket opt. + frontend | Monoracle events → local ledger; mark via ACTIVE quotes mid-round, `getLatestPrice` at expiry |
@@ -47,7 +47,7 @@ contract that quotes and settles):
 | Market creator | Anyone (permissionless, `开市权` D-07) | `createMarket` for any token pair; multiple markets per pair allowed (D-14) |
 | Market maker / provider (bot) | Bot EOA | `submitQuote(..., expiryBlock)` per market round (bilateral collateral) → `settleValidQuote` after expiry → `withdrawProviderFunds`; absorbs P&L as the mirror of users (zero-sum, D-10) |
 | Trader (any wallet) | Anyone | Directly `vetoUnderpriced`/`vetoOverpriced` on any ACTIVE quote (any provider, D-15), or via the wrapper (fee'd) |
-| MonoracleWindowed (self-deployed) | IRMarket-owned fork | The trading venue & price source; derived from upstream Monoracle |
+| Monoracle (self-deployed) | IRMarket-owned fork | The trading venue & price source; derived from upstream Monoracle |
 
 ### 1.3 Product semantics encoded (V0.8)
 
@@ -67,7 +67,7 @@ contract that quotes and settles):
 
 ```
 ┌─────────────┐   openLong/openShort (1% fee)    ┌──────────────────┐
-│  frontend   │ ──────▶  IRMarket.sol  ────────▶ │ MonoracleWindowed│ vetoUnderpriced /
+│  frontend   │ ──────▶  IRMarket.sol  ────────▶ │ Monoracle│ vetoUnderpriced /
 │  (Next.js)  │ ◀────── (wrapper: fee in HKD)     │  (IRMarket fork) │ vetoOverpriced
 └─────────────┘         ┌──────────────────┐     └──────────────────┘
        │ direct veto (no fee)              ▲             ▲
@@ -88,8 +88,8 @@ Data flow per trade:
 3. **With fee:** wrapper pulls `swapIn + fee` (long, both in HKD) or `baseAmount` LLM (short),
    forwards the swap into the veto, sends `fee` (HKD) to the market maker, forwards the
    swapped-out tokens to the user (short: `quoteAmount − fee` HKD).
-   **Without fee (close / direct):** user calls `MonoracleWindowed` directly.
-4. MonoracleWindowed atomically swaps in-window: asset lands in user's wallet. No further action.
+   **Without fee (close / direct):** user calls `Monoracle` directly.
+4. Monoracle atomically swaps in-window: asset lands in user's wallet. No further action.
 
 ---
 
@@ -114,7 +114,7 @@ struct Market {
 
 - `MAX_FEE_BPS = 10000`; `feeBps` validated `< MAX_FEE_BPS` (rejects ≥100%).
 - **No `enabled` kill-switch** — the contract is ownerless/adminless (consistent with §10).
-- `oracle` is a constructor constant (single MonoracleWindowed instance).
+- `oracle` is a constructor constant (single Monoracle instance).
 - `version()` returns `"0.9.0-vetomarket"` — a pure-marker view for the frontend/bot to
   assert they talk to the right wrapper build.
 - **No pair dedup** (D-14): the same underlying may list several option markets with
@@ -180,7 +180,7 @@ Maps to `vetoUnderpriced` (pay HKD, get LLM → 看涨).
 2. `swapIn = quote.quoteAmount`; `fee = swapIn × feeBps / 10000` (HKD).
 3. `IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), swapIn + fee)` (gross, HKD).
 4. If `fee > 0`: `IERC20(quoteToken).safeTransfer(marketMaker, fee)`.
-5. `IMonoracleWindowed(oracle).vetoUnderpriced(quoteId)`
+5. `IMonoracle(oracle).vetoUnderpriced(quoteId)`
    — the oracle pulls `swapIn` (its quoteAmount) from this wrapper, sends `baseAmount` LLM to it.
 6. `IERC20(baseToken).safeTransfer(msg.sender, baseAmount)` — LLM lands in user's wallet.
 7. Emit `VetoWrapped(quoteId, marketId, msg.sender, LONG, quoteAmount, baseAmount, fee)`.
@@ -205,7 +205,7 @@ Maps to `vetoOverpriced` (pay LLM, get HKD → 看跌):
 #### Reverse close (平仓, D-08)
 
 - **No extra contract code:** closing = the reverse veto, executed **directly on
-  MonoracleWindowed** by the user. No fee on closes (the wrapper is open-only; a fee-on-close
+  Monoracle** by the user. No fee on closes (the wrapper is open-only; a fee-on-close
   wrapper variant is out of demo scope — A5).
 - Long holder (holds LLM) → `vetoOverpriced` on a fresh quote → gets HKD.
 - Short holder (holds HKD) → `vetoUnderpriced` on a fresh quote → gets LLM.
@@ -238,7 +238,7 @@ VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)   // quoteId/
 > (wallet-scoped + quote-join + market feeds) and keeps `side`/amounts/`fee` in `data`.
 > The frontend ABI (`web/src/lib/abis/market.ts`) matches — `side` is `indexed: false`.
 >
-> MonoracleWindowed's own events (`QuoteSubmitted` — now with `expiryBlock`,
+> Monoracle's own events (`QuoteSubmitted` — now with `expiryBlock`,
 > `QuoteVetoedUnderpriced`, `QuoteVetoedOverpriced`, `QuoteSettledValid`, `FundsWithdrawn`)
 > are the trading ledger — IRMarket mirrors `trader`/`fee` attribution for the UI.
 
@@ -246,13 +246,13 @@ VetoWrapped(quoteId, marketId, trader, side, swapIn, swapOut, fee)   // quoteId/
 
 `MarketDoesNotExist`, `InvalidToken`, `IdenticalTokens`, `FeeTooHigh`, `ExpiryMustBeFuture`,
 `QuotePairMismatch` (pre-check), `QuoteNotActive` (pre-check), `QuoteWindowExpired`
-(pre-check), plus passthrough of oracle errors (full set from `MonoracleWindowed.sol`):
+(pre-check), plus passthrough of oracle errors (full set from `Monoracle.sol`):
 `ZeroBaseAmount`, `QuoteAmountTooSmall`, `IdenticalTokens`, `ExpiryMustBeFuture`,
 `VerificationWindowActive` (settle too early), `VerificationWindowExpired` (veto too late),
 `QuoteDoesNotExist`, `QuoteNotActive`, `NotQuoteProvider`, `NotWithdrawable`,
 `ReentrancyGuardReentrantCall`, `SafeERC20FailedOperation`.
 
-### 3.8 Interface to MonoracleWindowed (local `IMonoracleWindowed`)
+### 3.8 Interface to Monoracle (local `IMonoracle`)
 
 Hand-written from the fork build (`abi/Monoracle.abi.json`), exposing only what IRMarket touches:
 
@@ -312,7 +312,7 @@ holds LLM. Done.
 
 ### 5.3 Reverse close (D-08)
 
-User (holding LLM) approves MonoracleWindowed directly → `vetoOverpriced(newQuoteId)` →
+User (holding LLM) approves Monoracle directly → `vetoOverpriced(newQuoteId)` →
 receives HKD, closes exposure. No wrapper, no fee (A5).
 
 ### 5.4 Expiry (D-06/D-09) — valuation only
@@ -335,7 +335,7 @@ when a quote settles (B12).
 | Stuck funds | every token either forwards out or pays MM in the same tx; no balances retained; approve-max only to the oracle |
 | Stale/missing quote | frontend reads ACTIVE quote events → none ⇒ disable trade panel ("waiting for bot", B4 degrade state); `getLatestPrice` `exists=false` guard |
 | Front-running | Monad has no public mempool (local mempools, 3 leaders); quoteId-anchored fills = see-what-you-sign price, zero slippage (B4); long windows (D-13) remove the timing race |
-| Fee bypass | direct `MonoracleWindowed` vetoes are fee-free by design (power users / closes) — accepted demo limitation |
+| Fee bypass | direct `Monoracle` vetoes are fee-free by design (power users / closes) — accepted demo limitation |
 | Malicious creator / bad pairs | market registration is permissionless by design (D-07); caller risks only their own allowance; MM chosen by creator |
 | Token safety | `SafeERC20`; only registered pair tokens ever touched; approve-max scalar per token |
 
@@ -388,11 +388,11 @@ when a quote settles (B12).
 
 ### 8.3 Market maker / creator
 
-1. Deploy the full stack with `script/deploy.js`: `MonoracleWindowed` → `IRMarket(oracle)` →
+1. Deploy the full stack with `script/deploy.js`: `Monoracle` → `IRMarket(oracle)` →
    mint `LLM`/`HKD` (`MockERC20`) → `createMarket(LLM, HKD, botAddr, expiryBlock, feeBps=100)`.
    All addresses/ids/tx-hashes land in `deployment.json` in one run.
 2. Fund faucet + bot with `LLM`/`HKD` (minted to deployer in step 1).
-3. Approve MonoracleWindowed (bot), then start quoting with `expiryBlock` = market expiry;
+3. Approve Monoracle (bot), then start quoting with `expiryBlock` = market expiry;
    keep the round alive for the 3-min demo.
 4. Later rounds: `script/create-market.js` (or the bot's `AUTO_CREATE_MARKET` roll) mint a new
    `marketId` and update `deployment.json`.
@@ -409,7 +409,7 @@ when a quote settles (B12).
 - **Oracle passthrough:** ACTIVE/window pre-checks revert; expired quote reverts
   (`VerificationWindowExpired`); already-vetoed quote reverts; insufficient allowance
   reverts.
-- **Windowed fork (see `test/MonoracleWindowed.test.js`, 6 cases):** price derivation +
+- **Windowed fork (see `test/Monoracle.test.js`, 6 cases):** price derivation +
   `ExpiryMustBeFuture`; veto any time inside the window; veto after expiry reverts; settle
   before expiry reverts; settle-after feeds `getLatestPrice`; last-settled quote wins
   canonical (final quote = mark, B12).
@@ -421,7 +421,7 @@ when a quote settles (B12).
 
 ## 10. Deployment
 
-- Deploy `MonoracleWindowed` (own instance — the trading venue; upstream's live testnet
+- Deploy `Monoracle` (own instance — the trading venue; upstream's live testnet
   deployment `0x1ABABc60...` is **not** used, its window is fixed 2 slots) then
   `IRMarket(oracle)` via `script/deploy.js` — one run also mints `LLM`/`HKD` (`MockERC20`)
   and `createMarket`s the demo round; it writes `deployment.json` (oracle/market/tokens,
@@ -444,7 +444,7 @@ when a quote settles (B12).
 | D-10 / Q1 / Q2 | ✅ | zero-sum, bot-collateral-backed; no pool, no insolvency (§1.3/§6) |
 | D-11 / Q3 / Q7 | ✅ | wrapper explicit 1%, gross-pull model (§4) |
 | D-12 / Q5 | ✅ | 溜溜梅 (06658.HK / HKG:6658) narrative locked; real feed, data source pinned at dev time |
-| D-13 / B8 | ✅ | per-quote `expiryBlock` fork (`contracts/MonoracleWindowed.sol`); no 600ms race |
+| D-13 / B8 | ✅ | per-quote `expiryBlock` fork (`contracts/Monoracle.sol`); no 600ms race |
 | D-14 / B9 | ✅ | no pair dedup; multi-market per underlying (§3.2/§3.3) |
 | D-15 / B10 | ✅ | wrapper accepts any provider's quotes (§3.4) |
 | D-16 / B11 | ✅ | fee always in HKD = `feeBps × quoteAmount / 10000` (§4) |
@@ -454,9 +454,9 @@ when a quote settles (B12).
 
 ---
 
-## 12. Reference: MonoracleWindowed fork (local, derived from upstream)
+## 12. Reference: Monoracle fork (local, derived from upstream)
 
-- **Source:** `contracts/MonoracleWindowed.sol` — fork of upstream
+- **Source:** `contracts/Monoracle.sol` — fork of upstream
   `github.com/dixia/monoracle` (`contracts/Monoracle.sol`, MIT). **Single behavioral
   change:** per-quote `expiryBlock` window replaces the fixed `VERIFICATION_SLOTS = 2`.
 - **Status: DEPRECATED (CWV-01).** Upstream has since merged the per-quote `expiryBlock`

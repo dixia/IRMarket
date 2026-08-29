@@ -92,7 +92,7 @@ export async function deployContracts(): Promise<DeployedContracts> {
 
   const oracleHash = await walletClient.deployContract({
     abi: oracleABI,
-    bytecode: loadArtifact("MonoracleWindowed").bytecode as Hex,
+    bytecode: loadArtifact("Monoracle").bytecode as Hex,
   });
   const oracleReceipt = await publicClient.waitForTransactionReceipt({ hash: oracleHash });
   const oracleAddr = oracleReceipt.contractAddress!;
@@ -160,7 +160,7 @@ export async function deployContracts(): Promise<DeployedContracts> {
     args: [marketAddr, maxUint256],
   });
 
-  console.log(`Deployed MonoracleWindowed: ${oracleAddr}`);
+  console.log(`Deployed Monoracle: ${oracleAddr}`);
   console.log(`Deployed IRMarket:         ${marketAddr}`);
   console.log(`Deployed BASE:             ${baseTokenAddr}`);
   console.log(`Deployed QUOTE:            ${quoteTokenAddr}`);

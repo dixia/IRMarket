@@ -58,8 +58,8 @@ export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | 
     (data ?? []).forEach((entry, i) => {
       const r = entry.result;
       if (!r || typeof r === "undefined") return;
-      const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, startSlot, settledSlot, expiryBlock, status] = r as readonly [
-        `0x${string}`, `0x${string}`, `0x${string}`, bigint, bigint, bigint, number, number, bigint, number,
+      const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, startSlot, expiryBlock, settledSlot, status] = r as readonly [
+        `0x${string}`, `0x${string}`, `0x${string}`, bigint, bigint, bigint, number, number, number, number,
       ];
       if (provider === "0x0000000000000000000000000000000000000000") return;
       if (pair) {
@@ -76,7 +76,7 @@ export function useQuotes(pair: { base: `0x${string}`; quote: `0x${string}` } | 
         price,
         startSlot,
         settledSlot,
-        expiryBlock,
+        expiryBlock: BigInt(expiryBlock),
         status: status as Quote["status"],
       });
     });

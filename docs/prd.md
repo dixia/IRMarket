@@ -4,7 +4,7 @@
 >
 > **V0.8 变更说明**：按用户对 Monoracle 机制的深度澄清，**推翻了 V0.6/V0.7 的"IRMarket 自有资金池 + 线性合约"模型**，重构为 **Veto-Market 架构**：交易层 = Monoracle 报价否决流本身（"看多/看跌 = price verification 套利"），IRMarket 退化为薄层（市场工厂 / 持仓索引 / 费用包裹，demo 可省）。
 >
-> **V0.8.1 变更说明**：否决窗口对齐期权到期日（D-13）——引入自部署的 **MonoracleWindowed 分叉合约**（`contracts/MonoracleWindowed.sol`，派生自 `github.com/dixia/monoracle`，用户批准的唯一破例）；市场去重取消（D-14）、wrapper 不限制报价来源（D-15）、手续费统一按 HKD 计（D-16）。
+> **V0.8.1 变更说明**：否决窗口对齐期权到期日（D-13）——引入自部署的 **Monoracle 分叉合约**（`contracts/Monoracle.sol`，派生自 `github.com/dixia/monoracle`，用户批准的唯一破例）；市场去重取消（D-14）、wrapper 不限制报价来源（D-15）、手续费统一按 HKD 计（D-16）。
 
 ## 阅读约定
 
@@ -48,7 +48,7 @@
 
 | # | 位置 | 修改 | 原因 |
 |---|------|------|------|
-| R16 | 全文 | 否决窗口：2-slot 固定窗口 → **quote 级 `expiryBlock` = 期权到期日**；引入自部署分叉合约 `contracts/MonoracleWindowed.sol` | 用户 B8："放大否决窗口。窗口对齐期权到期日（本质上是一样的）"；人工签名延迟问题消失 |
+| R16 | 全文 | 否决窗口：2-slot 固定窗口 → **quote 级 `expiryBlock` = 期权到期日**；引入自部署分叉合约 `contracts/Monoracle.sol` | 用户 B8："放大否决窗口。窗口对齐期权到期日（本质上是一样的）"；人工签名延迟问题消失 |
 | R17 | §四/§八 | 市场注册取消去重：同标的多市场并存（不同到期/费率） | 用户 B9："一个资产可以有不同的期权，到期了再上新的，标的是一样的" |
 | R18 | §四 | wrapper 不限制报价来源（任何 provider 的报价可 veto，费用仍归注册 MM） | 用户 B10 选 b |
 | R19 | §二/§四 | 手续费统一按 HKD（quote）计：`feeBps × quoteAmount / 10000`；看涨加在付入端、看跌从收付出扣 | 用户 B11："按 quote 收取更好理解" |
@@ -58,7 +58,7 @@
 ## 〇、Monoracle 机制速览（认知基线）
 
 > 以下为 Monoracle 合约源码（`github.com/dixia/monoracle` → `contracts/Monoracle.sol`）+ tech-spec 中的真实行为。PRD 中涉及 Monoracle 的一切表述都以此为准。
-> 〔v0.8.1 R16〕IRMarket 实际交易场所是**自部署的分叉合约 `MonoracleWindowed`**（唯一改动：每笔报价带 `expiryBlock`，否决窗口 = 期权到期日，D-13）。除窗口外，机制与上游完全一致。
+> 〔v0.8.1 R16〕IRMarket 实际交易场所是**自部署的分叉合约 `Monoracle`**（唯一改动：每笔报价带 `expiryBlock`，否决窗口 = 期权到期日，D-13）。除窗口外，机制与上游完全一致。
 
 Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，**没有链下数据源、没有多节点共识**：
 
@@ -82,11 +82,11 @@ Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，*
 
 | 能力 | 由谁提供 | 说明 |
 |------|----------|------|
-| 报价提交 / 账本 / 事件 | 🔁 MonoracleWindowed（IRMarket 自部署分叉，D-13） | `submitQuote(..., expiryBlock)` + `quotes` + 5 个 indexed 事件 |
-| **多空交易撮合** | 🔁 MonoracleWindowed | veto 流 = 用户以报价价格与 provider 换手 |
-| **盈亏资产交割** | 🔁 MonoracleWindowed | veto 交易内当场换手，无后续结算动作 |
-| 验证窗口 / 仲裁 | 🔁 MonoracleWindowed | **窗口 = 期权到期日**（quote 级 `expiryBlock`）；免许可 |
-| 有效价结算 / 读取 | 🔁 MonoracleWindowed | `settleValidQuote` / `getLatestPrice` |
+| 报价提交 / 账本 / 事件 | 🔁 Monoracle（IRMarket 自部署分叉，D-13） | `submitQuote(..., expiryBlock)` + `quotes` + 5 个 indexed 事件 |
+| **多空交易撮合** | 🔁 Monoracle | veto 流 = 用户以报价价格与 provider 换手 |
+| **盈亏资产交割** | 🔁 Monoracle | veto 交易内当场换手，无后续结算动作 |
+| 验证窗口 / 仲裁 | 🔁 Monoracle | **窗口 = 期权到期日**（quote 级 `expiryBlock`）；免许可 |
+| 有效价结算 / 读取 | 🔁 Monoracle | `settleValidQuote` / `getLatestPrice` |
 | 市场注册 / 工厂 | IRMarket 薄层 | createMarket 工厂；**同标的多市场并存，不去重**（D-14） |
 | 持仓索引 / UI 估值 | IRMarket 薄层 + 前端 | 监听 veto 事件 → 持仓记录；轮中按 ACTIVE 报价、到期按 `getLatestPrice` 估值（B12） |
 | 手续费（1%，HKD） | IRMarket 包裹层 | Monoracle 内无扣费位（见 R14/D-16） |
@@ -124,7 +124,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### 1.4 项目当前状态
 
-- 脚手架完成；`contracts/MonoracleWindowed.sol` 分叉合约已就位（唯一改动：quote 级 `expiryBlock` 窗口，D-13）+ 6 个窗口测试通过；`abi/Monoracle.abi.json` 已由分叉构建重新生成
+- 脚手架完成；`contracts/Monoracle.sol` 分叉合约已就位（唯一改动：quote 级 `expiryBlock` 窗口，D-13）+ 6 个窗口测试通过；`abi/Monoracle.abi.json` 已由分叉构建重新生成
 - V0.8.1 架构已由用户确认（D-07~D-16）
 - Demo 进入开发准备阶段
 
@@ -138,7 +138,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **交易方向**（✅ D-08，〔v0.8 R9〕）：
   - **看涨开仓 = `vetoUnderpriced`**：用户付 HKD，收 LLM → 做多 LLM
   - **看跌开仓 = `vetoOverpriced`**：用户付 LLM，收 HKD → 做空 LLM
-  - 用户钱包**直接调用 MonoracleWindowed 合约**（与报价/结算同一个合约，〔v0.8 R15〕；或经 IRMarket 包裹层扣费，D-11）
+  - 用户钱包**直接调用 Monoracle 合约**（与报价/结算同一个合约，〔v0.8 R15〕；或经 IRMarket 包裹层扣费，D-11）
 - **期限**：Demo 默认 **3 分钟**（✅ D-01，≈600 blocks）；UI 保留多期限选择。**期限即报价的 `expiryBlock`**（✅ D-13）：否决挑战期 = 期权期限，到期定标（bot 最终报价）+ UI 倒计时
 - **结算资产**：测试币 `HKD`（计价）/ `LLM`（标的），MockERC20 自铸（Monad 测试网无官方币）；报价对 = `(base=LLM, quote=HKD)`，价格 = HKD/LLM
 - **风险机制**：无爆仓、无追缴、无强平；最大亏损 = 投入本金。⚠️ 期权/杠杆术语已弃用，即"以 P 价格换手后承担标的涨跌"的现货式敞口
@@ -180,7 +180,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 ### 3.1 前置流程：bot 建市（Demo 阶段）
 
 1. （脚本）铸币：`LLM`、`HKD` 测试币 → 分发给 bot 与用户（faucet）
-2. （脚本）bot 授权 MonoracleWindowed 动用 LLM/HKD（approve）
+2. （脚本）bot 授权 Monoracle 动用 LLM/HKD（approve）
 3. （bot）拉取 06658.HK 真实行情 → 按公平价 P 提交首笔报价 `submitQuote(..., expiryBlock)`（🔁 双边质押；`expiryBlock` = 本轮到期块，D-13）
 4. （bot）报价被否决 → `withdrawProviderFunds` 回收后**立即补报**（restocking）；未否决报价到期后按序 `settleValidQuote` 回收（✅ D-05 间隔可配）
 5. IRMarket `createMarket(base, quote, expiryBlock, feeBps, marketMaker)` 注册市场（✅ D-14：同标的多市场并存，不去重）
@@ -213,9 +213,9 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### 4.1 智能合约层
 
-#### 4.1.1 MonoracleWindowed（🔁 交易与结算全责，IRMarket 自部署分叉）
+#### 4.1.1 Monoracle（🔁 交易与结算全责，IRMarket 自部署分叉）
 
-- 报价、否决（多空换手）、结算、提取、价格读取**全部由 MonoracleWindowed 承担**，IRMarket **不复制任何结算逻辑**（〔v0.8 R15〕："是同一个智能合约"）
+- 报价、否决（多空换手）、结算、提取、价格读取**全部由 Monoracle 承担**，IRMarket **不复制任何结算逻辑**（〔v0.8 R15〕："是同一个智能合约"）
 - 分叉来源：上游 `github.com/dixia/monoracle`（`contracts/Monoracle.sol`）；唯一改动 = quote 级 `expiryBlock` 窗口（✅ D-13，用户批准的唯一破例）
 - **已废弃标记（CWV-01）**：上游已将 quote 级 `expiryBlock` 并入主合约；分叉仅在使用中的 Monad 测试网部署服役到上游部署落地为止（见 TODO.md / GH issue #2）
 - 完整错误集（供前端/bot 解析）：`ZeroBaseAmount`、`QuoteAmountTooSmall`、`IdenticalTokens`、`ExpiryMustBeFuture`、`VerificationWindowActive`、`VerificationWindowExpired`、`QuoteDoesNotExist`、`QuoteNotActive`、`NotQuoteProvider`、`NotWithdrawable`
@@ -298,11 +298,11 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 | 标的 | 溜溜梅（06658.HK / HKG:6658，✅ D-12 已确认），bot 接真实行情 | 多标的、用户自定义标的 |
 | 交易 | 看涨/看跌 veto 开仓、反向 veto 平仓、到期 UI 估值（✅ D-08/D-09） | 限价单、止盈止损、杠杆/保证金 |
 | 做市商 | bot 持续报价（✅ D-05 可配间隔）+ 到期终报（✅ D-06） | 多做市商、分级基金（Stage 2） |
-| 价格 | MonoracleWindowed 报价 + 否决仲裁（🔁 自部署分叉，窗口=到期 D-13） | 多报价聚合 |
+| 价格 | Monoracle 报价 + 否决仲裁（🔁 自部署分叉，窗口=到期 D-13） | 多报价聚合 |
 | 费用 | ✅ D-11/D-16：IRMarket 包裹层显式扣 1%（HKD 计） | 动态费率、嵌入报价价差（不可行） |
 | 资产 | HKD/LLM 测试币（MockERC20）+ faucet | 多币种、稳定币、真实法币通道 |
 | 前端 | 市场列表、交易面板（报价+到期倒计时）、持仓/浮盈、到期估值 | 高级K线、深度图 |
-| 合约 | MonoracleWindowed（自部署分叉）+ IRMarket 薄层（工厂+费用包裹） | IRMarket 全功能市场合约 |
+| 合约 | Monoracle（自部署分叉）+ IRMarket 薄层（工厂+费用包裹） | IRMarket 全功能市场合约 |
 
 ---
 
@@ -316,7 +316,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 6. ✅ UI 链路：faucet→开仓(veto)→持仓→反向平仓→到期估值，无断点
 7. ✅ 设计风格：卡片式、黄色主色
 8. ⚠️ 标的：溜溜梅 06658.HK 已确认（D-12）；真实行情源的接入方式待开发时确认（bot 拉数源）
-9. ✅〔v0.8.1〕窗口/分叉：MonoracleWindowed 已编译 + 6 窗口测试通过；市场不去重（D-14）、不限报价来源（D-15）
+9. ✅〔v0.8.1〕窗口/分叉：Monoracle 已编译 + 6 窗口测试通过；市场不去重（D-14）、不限报价来源（D-15）
 10. ❓ 其他遗漏场景（请在下方反馈）
 
 ---
@@ -343,7 +343,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### V0.8.1 新增决策（D-13 ~ D-16，用户确认）
 
-- **D-13 窗口 = 期权到期日**：否决窗口由上游固定 2-slot 放大为 **quote 级 `expiryBlock` = 本轮到期块**（否决挑战期与期权期限是同一回事）；实现 = 自部署分叉 `contracts/MonoracleWindowed.sol`（派生上游，唯一改动，用户批准的唯一破例）
+- **D-13 窗口 = 期权到期日**：否决窗口由上游固定 2-slot 放大为 **quote 级 `expiryBlock` = 本轮到期块**（否决挑战期与期权期限是同一回事）；实现 = 自部署分叉 `contracts/Monoracle.sol`（派生上游，唯一改动，用户批准的唯一破例）
 - **D-14 市场不去重**：同一标的多市场并存（不同到期/费率），到期后再上新轮次；createMarket 永远新建 marketId
 - **D-15 不限报价来源**：wrapper 允许 veto 任何 provider 的报价；1% 费用归注册 MM
 - **D-16 手续费 HKD 计**：`feeBps × quoteAmount / 10000`（HKD）；看涨加在付入端、看跌从收付出扣
@@ -390,8 +390,8 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 
 ### V0.8.1 评审已拍板（B8 ~ B11 对应）
 
-- **B8（窗口 vs 人工延迟）→ 答案**："放大否决窗口，窗口对齐期权到期日（本质上是一样的）"→ **D-13**：quote 级 `expiryBlock` = 本轮到期块；自部署分叉 `MonoracleWindowed`
+- **B8（窗口 vs 人工延迟）→ 答案**："放大否决窗口，窗口对齐期权到期日（本质上是一样的）"→ **D-13**：quote 级 `expiryBlock` = 本轮到期块；自部署分叉 `Monoracle`
 - **B9（市场重开/去重）→ 答案**："一个资产可以有不同的期权，到期了再上新的，标的是一样的"→ **D-14**：不去重，多市场并存
 - **B10（报价来源）→ 答案 b**：不限制 → **D-15**
 - **B11（做空费币种）→ 答案**："按 quote 收取更好理解"→ **D-16**：统一 HKD
-- **分叉位置 → 答案 a**：分叉到 IRMarket repo（`contracts/MonoracleWindowed.sol`，用户批准的唯一破例）
+- **分叉位置 → 答案 a**：分叉到 IRMarket repo（`contracts/Monoracle.sol`，用户批准的唯一破例）

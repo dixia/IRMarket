@@ -12,7 +12,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { TxStatusCard, mapTransactionError, TxState } from "@/components/common/TxStatusCard";
 
 /**
- * Reverse-close (平仓, D-08): sign a DIRECT veto on MonoracleWindowed — no wrapper, no fee
+ * Reverse-close (平仓, D-08): sign a DIRECT veto on Monoracle — no wrapper, no fee
  * (D-11/D-16). Close of a short pays the FULL quoteAmount HKD, which may exceed the
  * quoteAmount − fee received at open → 「需补足 X HKD」 (E3).
  */

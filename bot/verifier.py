@@ -33,7 +33,7 @@ log = logging.getLogger("irmarket-bot")
 
 E18 = 10**18
 
-# QuoteStatus enum (MonoracleWindowed)
+# QuoteStatus enum (Monoracle)
 ACTIVE = 0
 VETOED_UNDERPRICED = 1
 VETOED_OVERPRICED = 2
@@ -195,7 +195,7 @@ class MarketMakerBot:
             q = self._quote(qid)
             if q[1].lower() != self.base_token.lower() or q[2].lower() != self.quote_token.lower():
                 continue
-            if q[8] != round_expiry:
+            if q[7] != round_expiry:
                 continue  # belongs to a different round
             if q[9] == ACTIVE:
                 active = qid if active is None or qid > active else active
@@ -280,14 +280,14 @@ class MarketMakerBot:
             q = self._quote(qid)
             if q[1].lower() != self.base_token.lower() or q[2].lower() != self.quote_token.lower():
                 continue
-            if q[8] != round_expiry:
+            if q[7] != round_expiry:
                 continue  # belongs to a different round
             if q[9] == ACTIVE:
                 self._send(self.oracle.functions.settleValidQuote(qid), GAS["settle"], f"settle q{qid}")
                 settled_ids.append(qid)
         for qid in sorted(self._own_quotes - self._withdrawn):
             q = self._quote(qid)
-            if q[8] != round_expiry:
+            if q[7] != round_expiry:
                 continue
             if q[9] in (SETTLED_VALID, VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 self._send(self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}")

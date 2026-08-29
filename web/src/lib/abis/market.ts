@@ -3,7 +3,7 @@ import type { Abi } from "viem";
 // IRMarket wrapper ABI — fee-wrapping entries openLong/openShort (sc-tech-spec §3.4/§11.1).
 // The registry + wrapper contract is still scaffolding; this ABI is the target interface
 // the UI renders against. Fee path (openLong/openShort) is used only when the wrapper
-// address is configured; otherwise the app trades direct on MonoracleWindowed (fee 0).
+// address is configured; otherwise the app trades direct on Monoracle (fee 0).
 export const IRMARKET_ABI = [
   {
     type: "function",

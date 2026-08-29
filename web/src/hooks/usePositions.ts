@@ -42,7 +42,17 @@ async function readQuote(
     })
     .catch(() => null);
   if (!q) return null;
-  const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, , , expiryBlock] = q as readonly unknown[];
+  const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, , expiryBlock] = q as readonly [
+    `0x${string}`,
+    `0x${string}`,
+    `0x${string}`,
+    bigint,
+    bigint,
+    bigint,
+    number,
+    number,
+    number,
+  ];
   if (provider === getAddress("0x0000000000000000000000000000000000000000")) return null;
   return {
     provider: provider as `0x${string}`,
@@ -51,7 +61,7 @@ async function readQuote(
     baseAmount: baseAmount as bigint,
     quoteAmount: quoteAmount as bigint,
     price: price as bigint,
-    expiryBlock: expiryBlock as bigint,
+    expiryBlock: BigInt(expiryBlock),
   };
 }
 

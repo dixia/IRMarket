@@ -10,7 +10,7 @@ export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://testnet-rpc.m
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 10143);
 export const EXPLORER_BASE = "https://testnet.monadscan.com";
 
-// MonoracleWindowed — the IRMarket-deployed fork with per-quote expiryBlock (D-13).
+// Monoracle — the upstream oracle with per-quote expiryBlock.
 // NOT the upstream Monoracle testnet deployment (fixed 2-slot window).
 export const ORACLE_ADDRESS_RAW = process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "";
 export const ORACLE_ADDRESS = ORACLE_ADDRESS_RAW as `0x${string}`;

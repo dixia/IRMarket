@@ -1,6 +1,6 @@
 /**
  * IRMarket — Hardhat test suite.
- * Covers the thin factory + fee wrapper over MonoracleWindowed (Veto-Market, V0.9):
+ * Covers the thin factory + fee wrapper over Monoracle (Veto-Market, V0.9):
  *   - market registry (no pair dedup, D-14) + validation
  *   - openLong / openShort fee wrapper (1% in HKD, D-11/D-16)
  *   - oracle passthrough & window pre-checks
@@ -33,7 +33,7 @@ describe("IRMarket — market registry (D-07/D-14)", function () {
     creator = c;
     mm = m;
 
-    const Oracle = await ethers.getContractFactory("MonoracleWindowed");
+    const Oracle = await ethers.getContractFactory("MonoracleMock");
     oracle = await Oracle.deploy();
 
     const Token = await ethers.getContractFactory("MockERC20");
@@ -111,7 +111,7 @@ describe("IRMarket — fee wrapper (D-11/D-16)", function () {
     provider = p;
     trader = t;
 
-    const Oracle = await ethers.getContractFactory("MonoracleWindowed");
+    const Oracle = await ethers.getContractFactory("MonoracleMock");
     oracle = await Oracle.deploy();
 
     const Token = await ethers.getContractFactory("MockERC20");
@@ -257,7 +257,7 @@ describe("IRMarket — zero-sum invariant (D-10)", function () {
   it("trader profit mirrors provider loss on a vetoed quote", async function () {
     const [c, p, t, m] = await ethers.getSigners();
 
-    const Oracle = await ethers.getContractFactory("MonoracleWindowed");
+    const Oracle = await ethers.getContractFactory("MonoracleMock");
     const oracle = await Oracle.deploy();
 
     const Token = await ethers.getContractFactory("MockERC20");

@@ -6,6 +6,11 @@
   },
   {
     "inputs": [],
+    "name": "ExpiryTooFar",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "IdenticalTokens",
     "type": "error"
   },
@@ -173,9 +178,9 @@
       },
       {
         "indexed": false,
-        "internalType": "uint256",
+        "internalType": "uint32",
         "name": "expiryBlock",
-        "type": "uint256"
+        "type": "uint32"
       }
     ],
     "name": "QuoteSubmitted",
@@ -218,6 +223,32 @@
     ],
     "name": "QuoteVetoedUnderpriced",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_VERIFICATION_SLOTS",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "VERIFICATION_SLOTS",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [
@@ -332,16 +363,16 @@
       },
       {
         "internalType": "uint32",
+        "name": "expiryBlock",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
         "name": "settledSlot",
         "type": "uint32"
       },
       {
-        "internalType": "uint256",
-        "name": "expiryBlock",
-        "type": "uint256"
-      },
-      {
-        "internalType": "enum MonoracleWindowed.QuoteStatus",
+        "internalType": "enum Monoracle.QuoteStatus",
         "name": "status",
         "type": "uint8"
       }
@@ -385,9 +416,9 @@
         "type": "uint256"
       },
       {
-        "internalType": "uint256",
+        "internalType": "uint32",
         "name": "expiryBlock",
-        "type": "uint256"
+        "type": "uint32"
       }
     ],
     "name": "submitQuote",

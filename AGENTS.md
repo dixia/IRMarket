@@ -43,7 +43,7 @@ cd web && npm install && npx next dev -p 3000  # frontend
 ### Architecture at a glance
 Monad veto-arbitrage 长/短市场：
 - 长 = `vetoUnderpriced`（付 HKD 收 LLM），短 = `vetoOverpriced`；多空 = Monoracle veto 方向，勿用传统订单簿语义。
-- `contracts/MonoracleWindowed.sol` = 上游 Monoracle 的分叉（per-quote `expiryBlock`，验证窗口 = 期权到期，已取代 2-slot 假设；勿再引入上游 Monoracle 全文）。**已废弃，见 `TODO.md`**。
+- `contracts/Monoracle.sol` = 上游 Monoracle 的分叉（per-quote `expiryBlock`，验证窗口 = 期权到期，已取代 2-slot 假设；勿再引入上游 Monoracle 全文）。**已废弃，见 `TODO.md`**。
 - `contracts/IRMarket.sol` = 1% HKD fee wrapper：`openLong/openShort(marketId, quoteId)`。
 
 ### Commit & hygiene

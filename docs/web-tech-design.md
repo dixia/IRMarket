@@ -2,7 +2,7 @@
 
 > **Status:** Implemented, doc synced (V0.9.2). Mirrors `docs/prd.md` (V0.8.1) and
 > `docs/sc-tech-spec.md` (V0.9) for the on-chain interface. The frontend is a **veto client**:
-> users trade by vetoing ACTIVE quotes on **MonoracleWindowed** (the IRMarket-deployed fork of
+> users trade by vetoing ACTIVE quotes on **Monoracle** (the IRMarket-deployed fork of
 > Monoracle) — bull via the fee wrapper `openLong`, bear via `openShort` (explicit `quoteId`,
 > Q2-A); closes are direct reverse vetoes (D-08/D-11/D-16). No pool, no settlement, no claim
 > (D-09). Decisions D-01 … D-16, Q1 … Q8 confirmed; the wrapper is **implemented**
@@ -35,7 +35,7 @@ contract interface in `docs/sc-tech-spec.md` V0.9.
 |---|---|---|---|
 | Long open (bull) | IRMarket `openLong(marketId, quoteId)` → via `vetoUnderpriced` | pay `quoteAmount + fee` HKD → receive `baseAmount` LLM | holds LLM |
 | Short open (bear) | IRMarket `openShort(marketId, quoteId)` → `vetoOverpriced` | pay `baseAmount` LLM → receive `quoteAmount − fee` HKD | holds HKD |
-| Close (D-08) | **direct** `vetoUnderpriced`/`vetoOverpriced` on MonoracleWindowed (no wrapper, no fee) | swaps back | flat |
+| Close (D-08) | **direct** `vetoUnderpriced`/`vetoOverpriced` on Monoracle (no wrapper, no fee) | swaps back | flat |
 
 Contract facts that constrain the UI:
 
@@ -63,7 +63,7 @@ Contract facts that constrain the UI:
 - On-chain vocab & fee/window semantics: `docs/sc-tech-spec.md` (V0.9)
 - **UI copy: `docs/product/ui_copy.md`** — the canonical English strings for every screen.
   Components reference these exact strings; do not introduce ad-hoc wording.
-- ABI: `src/lib/abis/oracle.ts` (`MonoracleWindowed`) + `src/lib/abis/market.ts` (IRMarket +
+- ABI: `src/lib/abis/oracle.ts` (`Monoracle`) + `src/lib/abis/market.ts` (IRMarket +
   ERC20)
 - Gas/realtime/finality: upstream `tech-spec.md` §5/§10 (adapted for the fork §7)
 
@@ -139,12 +139,12 @@ src/
 │  ├─ wagmi.ts               # chain/config (Monad testnet 10143)
 │  ├─ format.ts              # 1e18 fixed-point → display, fee math, countdown
 │  ├─ types.ts               # Market/Quote/Position/PriceState
-│  └─ abis/                  # oracle.ts, market.ts, MonoracleWindowed.json
+│  └─ abis/                  # oracle.ts, market.ts, Monoracle.json
 ```
 
 ### 3.3 ABI & addresses
 
-- **MonoracleWindowed** (trading venue): `src/lib/abis/oracle.ts` — the **fork** ABI.
+- **Monoracle** (trading venue): `src/lib/abis/oracle.ts` — the **fork** ABI.
   UI-needed members: `quotes(uint256)`, `vetoUnderpriced`, `vetoOverpriced`, `nextQuoteId`,
   `getLatestPrice`, events `QuoteSubmitted` (carries `expiryBlock`),
   `QuoteVetoedUnderpriced`, `QuoteVetoedOverpriced`, `QuoteSettledValid`. Public getter shape
@@ -160,7 +160,7 @@ src/
 ```
 NEXT_PUBLIC_RPC_URL=https://testnet-rpc.monad.xyz
 NEXT_PUBLIC_CHAIN_ID=10143
-NEXT_PUBLIC_ORACLE_ADDRESS=0x...            # MonoracleWindowed (IRMarket-deployed fork — NOT
+NEXT_PUBLIC_ORACLE_ADDRESS=0x...            # Monoracle (IRMarket-deployed fork — NOT
                                             # upstream 0x1ABABc60... whose window is fixed 2 slots)
 NEXT_PUBLIC_MARKET_ADDRESS=0x...            # IRMarket wrapper (openLong/openShort)
 NEXT_PUBLIC_BASE_TOKEN=0x...                # LLM
@@ -277,7 +277,7 @@ bear:  PNL = (open − current) × units     market value = held_HKD
   hints.
 - **Approve targets differ by action** (sc-tech-spec §5.2/§5.3):
   - open (long → HKD, short → LLM): approve the **wrapper**;
-  - close (pay side depends on held asset): approve **MonoracleWindowed** directly.
+  - close (pay side depends on held asset): approve **Monoracle** directly.
 - Allowance polled per target; the order button promotes to "Approve" then the action.
 
 ---
@@ -344,7 +344,7 @@ liquidations" (D-01 expiry is a market property shown as countdown, not a per-tr
   PnL + "Settled" badge.
 - Pre-expiry action: yellow-outlined "Reverse close" → reverse-veto preview card (pay `X`
   receive `Y` @ new quote `P'`, **no fee**) → sign **direct**
-  `vetoOverpriced`/`vetoUnderpriced` on MonoracleWindowed → position closes on receipt.
+  `vetoOverpriced`/`vetoUnderpriced` on Monoracle → position closes on receipt.
   - **Short-close top-up (E3):** a wrapper short received `quoteAmount − fee` HKD at open, but
     closing pays the **full** `quoteAmount` HKD → the preview shows "Top-up required (fee
     deducted at open)" and validates balance against `quoteAmount`. The `fee` is the
@@ -446,7 +446,7 @@ tx. Faucet covers LLM/HKD, not MON.
 2. Trade panel reuses the ACTIVE-quote flow in reverse direction, **no fee**; preview pay `X`
    receive `Y` @ `P'`. For a short close the payable is the full `quoteAmount` HKD — show the
    shortfall vs the `quoteAmount − fee` received at open ("Top-up required", E3).
-3. Approve MonoracleWindowed for the pay-side token if needed → sign **direct**
+3. Approve Monoracle for the pay-side token if needed → sign **direct**
    `vetoOverpriced`/`vetoUnderpriced` → on receipt the position disappears.
 
 ### Scenario 3 — Expiry (valuation)
@@ -486,7 +486,7 @@ strings in `ui_copy.md`):
 
 - **IRMarket wrapper:** `MarketDoesNotExist`, `QuotePairMismatch`, `QuoteNotActive`,
   `QuoteWindowExpired`, `FeeTooHigh`, `ExpiryMustBeFuture`, `InvalidToken`, `IdenticalTokens`
-- **MonoracleWindowed fork:** `VerificationWindowExpired`, `VerificationWindowActive`,
+- **Monoracle fork:** `VerificationWindowExpired`, `VerificationWindowActive`,
   `QuoteDoesNotExist`, `QuoteNotActive`, `QuoteAmountTooSmall`, `ZeroBaseAmount`,
   `ExpiryMustBeFuture`, `NotQuoteProvider`, `NotWithdrawable`
 - **OpenZeppelin / OZ-adjacent (revert-data, not ABI errors):** `ERC20InsufficientAllowance`,
@@ -499,7 +499,7 @@ handled in the data layer (§4.3), not via `decodeErrorResult`.
 
 ## 10. Test Strategy (Playwright E2E)
 
-`web/tests/setup.ts` (TODO) must: compile + deploy `MonoracleWindowed` + `IRMarket(oracle)`,
+`web/tests/setup.ts` (TODO) must: compile + deploy `Monoracle` + `IRMarket(oracle)`,
 mint `LLM`/`HKD`, `createMarket(LLM, HKD, bot, expiryBlock, feeBps=100)`, boot a quote bot on
 a local Hardhat node (127.0.0.1:8545), fund EOA (LLM/HKD + MON), write `web/.env.local`,
 start Next dev, teardown.
@@ -543,7 +543,7 @@ createMarket(...)                             // registry write — bot/script o
 
 - **Explicit quoteId (Q2-A):** D-13 (window = round expiry) removed the 600ms race, so the UI
   commits to a specific quote — see-what-you-sign, zero slippage.
-- Approval target for opens = the **wrapper**; for closes = **MonoracleWindowed** (§4.6).
+- Approval target for opens = the **wrapper**; for closes = **Monoracle** (§4.6).
 - **Fee comes from `markets(marketId).feeBps`** (per-market, D-11/D-16) — there is **no global
   `CHARGER_FEE_BPS` switch**. A market created with `feeBps=0` is fee-free pass-through.
 - `createMarket` is invoked by the deploy script / bot, not exposed in the dapp (listing only

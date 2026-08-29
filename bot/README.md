@@ -1,6 +1,6 @@
 # IRMarket Bot
 
-> Market-maker & settlement bot for IRMarket on the MonoracleWindowed veto-arbitrage
+> Market-maker & settlement bot for IRMarket on the Monoracle veto-arbitrage
 > primitive (V0.9 Veto-Market, docs/sc-tech-spec.md §5.1/§8.2).
 
 ## Quick Start

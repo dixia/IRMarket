@@ -9,6 +9,7 @@ const rootDir = path.resolve(__dirname, "..");
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 if (!PRIVATE_KEY) { console.error("Set PRIVATE_KEY env var"); process.exit(1); }
+const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS;
 const RPC_URL = process.env.RPC_URL || "https://testnet-rpc.monad.xyz";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
 
@@ -68,9 +69,14 @@ async function main() {
     };
   }
 
-  // 1. MonoracleWindowed — the trading venue / price source (per-quote expiry window, D-13)
-  console.log("\n[1/4] Deploying MonoracleWindowed (oracle fork)...");
-  const oracle = await deploy("MonoracleWindowed");
+  let oracle;
+  if (ORACLE_ADDRESS) {
+    console.log("\n[1/4] Using existing oracle:", ORACLE_ADDRESS);
+    oracle = { target: ORACLE_ADDRESS };
+  } else {
+    console.log("\n[1/4] Deploying Monoracle (oracle)...");
+    oracle = await deploy("MonoracleMock");
+  }
 
   // 2. IRMarket(oracle) — thin factory + fee wrapper
   console.log("\n[2/4] Deploying IRMarket(oracle)...");

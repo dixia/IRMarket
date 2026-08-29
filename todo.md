@@ -6,5 +6,4 @@ _Tracking convention: this file is only an index — each item references a GH i
 ## Migrate `MonoracleWindowed.sol` to latest upstream Monoracle (CWV-01)
 
 - GH: https://github.com/dixia/IRMarket/issues/2
-- Status: **OPEN** — upstream requirement covered + implemented (`dd3b1ef`); keep the fork
-  deployed until upstream testnet deploy lands. Details in the issue.
+- Status: **DONE** — upstream `github.com/dixia/monoracle` merged per-quote `expiryBlock`; replaced fork with `IMonoracle.sol` + upstream `Monoracle.json` artifact; added `contracts/test/MonoracleMock.sol` for Hardhat tests.

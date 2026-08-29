@@ -16,7 +16,7 @@ Contracts (Monad testnet, deployed & verified):
 
 | Contract | Address |
 |---|---|
-| MonoracleWindowed (oracle fork, D-13) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
+| Monoracle (oracle fork, D-13) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
 | IRMarket (factory + 1% fee wrapper) | `0x03b181080878515a01c5DA3EB262bf07C595dFef` |
 | LLM (base token) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
 | HKD (quote token) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |

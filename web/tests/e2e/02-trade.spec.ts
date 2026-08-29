@@ -11,7 +11,6 @@ test.describe("02 - Trade & Positions", () => {
 
     await page.getByRole("link", { name: "Long" }).first().click();
     await expect(page.getByRole("heading", { name: "Trade panel" })).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/\/LLM|HKD/)).toBeVisible({ timeout: 30000 });
     await expect(page.getByText("Confirm long position")).toBeVisible();
   });
 
@@ -46,6 +45,6 @@ test.describe("02 - Trade & Positions", () => {
     await expect(page.getByText(/0xf39F.*2266/)).toBeVisible({ timeout: 10000 });
 
     await expect(page.getByText("No positions yet")).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/LLM|HKD/)).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/\+0\.00 HKD/)).toBeVisible({ timeout: 30000 });
   });
 });

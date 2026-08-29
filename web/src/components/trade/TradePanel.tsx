@@ -33,13 +33,13 @@ function QuoteCard({
     <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
       <div className="flex items-center justify-between text-xs text-text-dim">
         <span>Quote #{quote.quoteId.toString()}</span>
-        {expired ? (
-          <span className="text-bear">Expired</span>
-        ) : (
-          <span className="text-primary">
-            Expires in {blockNumber !== undefined ? formatCountdown(quote.expiryBlock - blockNumber) : "…"}
-          </span>
-        )}
+      {expired ? (
+        <span className="text-bear">Expired</span>
+      ) : (
+        <span className="text-primary">
+          Expires in {blockNumber !== undefined ? formatCountdown(BigInt(quote.expiryBlock) - blockNumber) : "…"}
+        </span>
+      )}
       </div>
       <div className="mt-1 text-2xl font-bold text-primary">
         {formatPrice(quote.price)} {quoteSymbol}/{baseSymbol}

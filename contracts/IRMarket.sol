@@ -3,11 +3,11 @@ pragma solidity ^0.8.20;
 
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IMonoracleWindowed} from "./IMonoracleWindowed.sol";
+import {IMonoracle} from "./IMonoracle.sol";
 
 /**
  * @title IRMarket
- * @notice Thin market factory + fee wrapper over MonoracleWindowed (Veto-Market, PRD V0.8,
+ * @notice Thin market factory + fee wrapper over Monoracle (Veto-Market, PRD V0.8,
  *         tech-spec V0.9).
  * @dev    IRMarket does NOT price, match, settle or hold pools. Trading IS the Monoracle
  *         veto: 看涨 = vetoUnderpriced (pay quote HKD, receive base LLM), 看跌 =
@@ -53,7 +53,7 @@ contract IRMarket is ReentrancyGuard {
     // ============================================================
 
     /// @dev The trading venue. Ownerless/adminless (no kill switch).
-    IMonoracleWindowed public immutable oracle;
+    IMonoracle public immutable oracle;
 
     /// @dev Auto-incrementing market ID. Starts at 1 so that markets[0] is the empty
     ///      struct (mirrors Monoracle's nextQuoteId). No pair dedup (D-14): the same
@@ -106,7 +106,7 @@ contract IRMarket is ReentrancyGuard {
 
     constructor(address oracle_) {
         if (oracle_ == address(0)) revert InvalidToken();
-        oracle = IMonoracleWindowed(oracle_);
+        oracle = IMonoracle(oracle_);
     }
 
     // ============================================================
@@ -167,7 +167,7 @@ contract IRMarket is ReentrancyGuard {
         Market storage m = markets[marketId];
         if (m.baseToken == address(0)) revert MarketDoesNotExist();
 
-        IMonoracleWindowed.Quote memory q = _checkTradeable(m, quoteId);
+        IMonoracle.Quote memory q = _checkTradeable(m, quoteId);
 
         uint256 fee = (q.quoteAmount * m.feeBps) / MAX_FEE_BPS;
 
@@ -198,7 +198,7 @@ contract IRMarket is ReentrancyGuard {
         Market storage m = markets[marketId];
         if (m.baseToken == address(0)) revert MarketDoesNotExist();
 
-        IMonoracleWindowed.Quote memory q = _checkTradeable(m, quoteId);
+        IMonoracle.Quote memory q = _checkTradeable(m, quoteId);
 
         uint256 fee = (q.quoteAmount * m.feeBps) / MAX_FEE_BPS;
 
@@ -234,11 +234,11 @@ contract IRMarket is ReentrancyGuard {
     function _checkTradeable(Market storage m, uint256 quoteId)
         internal
         view
-        returns (IMonoracleWindowed.Quote memory q)
+        returns (IMonoracle.Quote memory q)
     {
         q = oracle.quotes(quoteId);
         if (q.baseToken != m.baseToken || q.quoteToken != m.quoteToken) revert QuotePairMismatch();
-        if (q.status != IMonoracleWindowed.QuoteStatus.ACTIVE) revert QuoteNotActive();
+        if (q.status != IMonoracle.QuoteStatus.ACTIVE) revert QuoteNotActive();
         if (block.number > q.expiryBlock) revert QuoteWindowExpired();
     }
 }

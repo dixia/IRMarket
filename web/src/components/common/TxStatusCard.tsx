@@ -9,11 +9,11 @@ export type TxState =
   | { status: "success"; hash: `0x${string}`; title?: string; detail?: ReactNode }
   | { status: "error"; message: string };
 
-/** Friendly mapping for IRMarket + MonoracleWindowed errors (sc-tech-spec §3.7 / web-tech-design §9). */
+/** Friendly mapping for IRMarket + Monoracle errors (sc-tech-spec §3.7 / web-tech-design §9). */
 export function mapTransactionError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   const map: Array<[RegExp, string]> = [
-    // MonoracleWindowed fork errors
+    // Monoracle errors
     [/VerificationWindowExpired|QuoteWindowExpired/, "Quote window passed — please select the latest quote"],
     [/VerificationWindowActive/, "Quote window is still open; cannot veto yet"],
     [/QuoteDoesNotExist/, "Quote not found — please refresh and retry"],
