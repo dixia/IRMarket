@@ -155,6 +155,10 @@ contract MonoracleMock is IMonoracle {
         return latestValidQuoteId_[pairHash];
     }
 
+    function nextQuoteId() external view returns (uint256) {
+        return nextQuoteId_;
+    }
+
     function quotes(uint256 quoteId) external view returns (Quote memory) {
         QuoteData storage q = quotes_[quoteId];
         if (q.provider == address(0)) revert QuoteDoesNotExist();

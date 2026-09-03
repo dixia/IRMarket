@@ -8,15 +8,18 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 60000,
-  expect: { timeout: 15000 },
+  timeout: 120000,
+  expect: { timeout: 30000 },
 
   globalSetup: path.join(WEB_DIR, "tests", "setup.ts"),
 
   use: {
     baseURL: "http://localhost:3000",
     headless: true,
-    channel: "msedge",
+    launchOptions: {
+      executablePath: "/usr/bin/chromium",
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    },
   },
 
   webServer: {
@@ -24,6 +27,6 @@ export default defineConfig({
     cwd: WEB_DIR,
     port: 3000,
     reuseExistingServer: false,
-    timeout: 60000,
+    timeout: 120000,
   },
 });

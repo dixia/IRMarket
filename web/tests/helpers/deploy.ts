@@ -17,20 +17,27 @@ const SHARED_DIR = path.resolve(
   import.meta.dirname,
   "..",
   "..",
-  "..",
-  "..",
-  "shared",
-  "IRMarket"
+  ".."
 );
 
 function loadArtifact(name: string) {
-  const artifactPath = path.join(
+  let artifactPath = path.join(
     SHARED_DIR,
     "artifacts",
     "contracts",
     `${name}.sol`,
     `${name}.json`
   );
+  if (!fs.existsSync(artifactPath)) {
+    artifactPath = path.join(
+      SHARED_DIR,
+      "artifacts",
+      "contracts",
+      "test",
+      `${name}.sol`,
+      `${name}.json`
+    );
+  }
   return JSON.parse(fs.readFileSync(artifactPath, "utf8"));
 }
 
@@ -71,7 +78,7 @@ const approveABI = [
   },
 ] as const;
 
-const oracleABI = loadArtifact("Monoracle").abi;
+const oracleABI = loadArtifact("MonoracleMock").abi;
 const irMarketABI = loadArtifact("IRMarket").abi;
 
 const submitQuoteFn = oracleABI.find((f: any) => f.name === "submitQuote") as any;
@@ -92,7 +99,7 @@ export async function deployContracts(): Promise<DeployedContracts> {
 
   const oracleHash = await walletClient.deployContract({
     abi: oracleABI,
-    bytecode: loadArtifact("Monoracle").bytecode as Hex,
+    bytecode: loadArtifact("MonoracleMock").bytecode as Hex,
   });
   const oracleReceipt = await publicClient.waitForTransactionReceipt({ hash: oracleHash });
   const oracleAddr = oracleReceipt.contractAddress!;

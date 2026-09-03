@@ -5,15 +5,25 @@
  * Anvil Default Account #0: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
  * Anvil Default Account #1: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
  */
-export const ETHEREUM_BRIDGE_SCRIPT = `
+
+const ACCOUNTS = [
+  "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+  "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+];
+
+function makeBridgeScript(accountIndex: number): string {
+  const selectedAccount = ACCOUNTS[accountIndex] || ACCOUNTS[0];
+  const otherAccounts = ACCOUNTS.filter((_, i) => i !== accountIndex);
+
+  return `
 (function () {
   "use strict";
   var RPC = "http://localhost:8545";
   var _id = 0;
   var CHAIN_ID = "0x7A69"; // 31337
   var ACCOUNTS = [
-    "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
-    "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "${selectedAccount}",
+    ${otherAccounts.map(a => `"${a}"`).join(",")}
   ];
 
   function rpcRequest(method, params) {
@@ -91,3 +101,11 @@ export const ETHEREUM_BRIDGE_SCRIPT = `
   });
 })();
 `;
+}
+
+export function ethereumBridgeScript(accountIndex: number = 0): string {
+  return makeBridgeScript(accountIndex);
+}
+
+// Backward compatibility
+export const ETHEREUM_BRIDGE_SCRIPT = makeBridgeScript(0);

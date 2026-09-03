@@ -1,11 +1,29 @@
-import { type ChildProcess, spawn } from "child_process";
+import { type ChildProcess, spawn, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import { createPublicClient, http } from "viem";
+import { anvil } from "viem/chains";
 
 const ROOT_DIR = path.resolve(import.meta.dirname!, "..", "..");
 const SHARED_DIR = path.resolve(ROOT_DIR, "..", "shared", "IRMarket");
 
 let anvilProcess: ChildProcess | null = null;
+
+const publicClient = createPublicClient({
+  chain: anvil,
+  transport: http("http://localhost:8545"),
+});
+
+function killExistingAnvil() {
+  try {
+    // Kill any existing anvil process on port 8545
+    execSync("lsof -ti:8545 | xargs kill -9 2>/dev/null || true", { stdio: "ignore" });
+    // Also kill any child processes from previous runs
+    execSync("pkill -f 'anvil.*8545' 2>/dev/null || true", { stdio: "ignore" });
+  } catch {
+    // ignore
+  }
+}
 
 async function waitForAnvil(maxRetries = 30): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
@@ -30,10 +48,11 @@ async function waitForAnvil(maxRetries = 30): Promise<void> {
 }
 
 export default async function globalSetup() {
-  console.log("[Setup] Starting Anvil node via Foundry/WSL...");
-  anvilProcess = spawn("wsl", ["/home/h4n/.foundry/bin/anvil", "--host", "0.0.0.0", "--port", "8545"], {
+  killExistingAnvil();
+  
+  console.log("[Setup] Starting Anvil node...");
+  anvilProcess = spawn("anvil", ["--host", "0.0.0.0", "--port", "8545"], {
     stdio: "pipe",
-    shell: true,
   });
 
   anvilProcess.stdout?.on("data", (d: Buffer) => process.stdout.write(`[Anvil] ${d}`));
@@ -43,23 +62,34 @@ export default async function globalSetup() {
   console.log("[Setup] Anvil node is ready.");
 
   console.log("[Setup] Deploying contracts...");
-  const { deployContracts, createMarket, seedQuote } = await import("./helpers/deploy.js");
+  const { deployContracts } = await import("./helpers/deploy.js");
   const deployed = await deployContracts();
 
-  console.log("[Setup] Creating market...");
-  const marketId = await createMarket(deployed);
-  console.log(`[Setup] Created marketId=${marketId}`);
+  const EXPIRY_BLOCKS = 500;
+
+  console.log("[Setup] Creating market with short expiry...");
+  const { createMarketShortExpiry } = await import("./helpers/market.js");
+  const marketId = await createMarketShortExpiry(
+    deployed.market,
+    deployed.baseToken,
+    deployed.quoteToken,
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    EXPIRY_BLOCKS,
+    100
+  );
+  console.log(`[Setup] Created marketId=${marketId} (expiry in ${EXPIRY_BLOCKS} blocks)`);
 
   console.log("[Setup] Seeding initial quote...");
-  const quoteId = await seedQuote({
-    baseToken: deployed.baseToken,
-    quoteToken: deployed.quoteToken,
-    oracle: deployed.oracle,
-    price: 130n * 10n ** 18n,
-    baseAmount: 1n * 10n ** 18n,
-    quoteAmount: 130n * 10n ** 18n,
-    expiryBlocks: 1000,
-  });
+  const { submitQuote: seedQuote } = await import("./helpers/bot.js");
+  const currentBlock = await publicClient.getBlockNumber();
+  const quoteId = await seedQuote(
+    deployed.oracle,
+    deployed.baseToken,
+    deployed.quoteToken,
+    1n * 10n ** 18n,
+    130n * 10n ** 18n,
+    currentBlock + BigInt(EXPIRY_BLOCKS)
+  );
   console.log(`[Setup] Seeded quoteId=${quoteId}`);
 
   // Write .env.local
@@ -82,7 +112,7 @@ export default async function globalSetup() {
   // Also write a JSON file for test imports (not env-dependent)
   fs.writeFileSync(
     path.join(webDir, "tests", "helpers", "addresses.json"),
-    JSON.stringify({ ...deployed, marketId }, null, 2)
+    JSON.stringify({ ...deployed, marketId: marketId.toString() }, null, 2)
   );
 
   console.log(`[Setup] Wrote .env.local and addresses.json`);
