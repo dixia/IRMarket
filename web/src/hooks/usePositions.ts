@@ -213,7 +213,7 @@ export function usePositions(address: `0x${string}` | undefined) {
       return [...wrapped, ...vetoed];
     },
     enabled: isFullyConfigured && !!address && !!publicClient,
-    refetchInterval: blockNumber !== undefined ? 15000 : undefined,
+    refetchInterval: blockNumber !== undefined ? 15000 : 5000,
     staleTime: 5000,
   });
 

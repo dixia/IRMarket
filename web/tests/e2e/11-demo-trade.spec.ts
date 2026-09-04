@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { ethereumBridgeScript } from "../helpers/ethereum-bridge";
-import { submitQuote, mintToTrader2 } from "../helpers/bot";
+import { submitQuote, mintToTrader2, approveForTrader2 } from "../helpers/bot";
 import fs from "fs";
 import path from "path";
 
@@ -70,10 +70,15 @@ test.describe.serial("11 - Demo Trade: Open Long & Short", () => {
     );
   });
 
-test.skip("11.3 - Wallet B opens short via wrapper (different browser context) - SKIPPED: timing issue with quote loading in separate browser context", async ({ browser }) => {
-    // Mint tokens to Wallet B (Account #1) for short trade
+  test("11.3 - Wallet B opens short via wrapper (different browser context)", async ({ browser }) => {
     const addresses = JSON.parse(fs.readFileSync(addressesPath, "utf8"));
     await mintToTrader2(addresses.baseToken, addresses.quoteToken);
+    await approveForTrader2(
+      addresses.oracle,
+      addresses.marketAddress || addresses.market,
+      addresses.baseToken,
+      addresses.quoteToken
+    );
 
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -84,10 +89,8 @@ test.skip("11.3 - Wallet B opens short via wrapper (different browser context) -
     await page.getByRole("button", { name: "Connect Wallet" }).click();
     await expect(page.getByText(/0x7099.*79C8/)).toBeVisible({ timeout: 10000 });
 
-    // Wait for short tab/button to be visible
     await expect(page.getByRole("button", { name: "Short", exact: true })).toBeVisible({ timeout: 30000 });
 
-    // Submit a fresh quote so short trade can proceed (while UI is polling)
     await submitQuote(
       addresses.oracle,
       addresses.baseToken,
@@ -97,22 +100,35 @@ test.skip("11.3 - Wallet B opens short via wrapper (different browser context) -
       500n
     );
 
-    // Wait for the trade button to become enabled (quote loaded, approval ready)
     const tradeButton = page.getByRole("button", { name: /Confirm short position|Approve/ });
     await expect(tradeButton).toBeVisible({ timeout: 30000 });
-    // Wait for button to be enabled (not disabled)
     await expect(tradeButton).toBeEnabled({ timeout: 60000 });
 
-    // Keep clicking the trade button until position opens (handles both approval and trade steps)
-    for (let attempt = 0; attempt < 10; attempt++) {
+    const initialLabel = await tradeButton.textContent();
+
+    if (initialLabel?.includes("Approve")) {
       await tradeButton.click();
-      // Wait a bit for transaction to process
-      await page.waitForTimeout(5000);
-      // Check if position opened
-      const opened = await page.getByText("Position opened").isVisible({ timeout: 1000 }).catch(() => false);
-      if (opened) break;
-      // Re-locate button in case it was recreated
-      await expect(tradeButton).toBeVisible({ timeout: 10000 });
+
+      let attempts = 0;
+      while (attempts < 12) {
+        await page.waitForTimeout(2000);
+        attempts++;
+        const label = await tradeButton.textContent();
+        if (label?.includes("Confirm short position")) break;
+
+        const hasError = await page.getByText(/error|failed|revert/i).isVisible({ timeout: 500 }).catch(() => false);
+        if (hasError) {
+          await page.getByText(/error|failed|revert/i).first().textContent();
+        }
+      }
+
+      const afterApproveLabel = await tradeButton.textContent();
+
+      if (afterApproveLabel?.includes("Confirm short position")) {
+        await tradeButton.click();
+      }
+    } else if (initialLabel?.includes("Confirm short position")) {
+      await tradeButton.click();
     }
 
     await expect(page.getByText("Position opened")).toBeVisible({ timeout: 180000 });
@@ -120,7 +136,7 @@ test.skip("11.3 - Wallet B opens short via wrapper (different browser context) -
     await context.close();
   });
 
-  test.skip("11.4 - Short position appears on positions page for Wallet B - SKIPPED: depends on 11.3", async ({ browser }) => {
+  test("11.4 - Short position appears on positions page for Wallet B", async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
 
@@ -130,8 +146,12 @@ test.skip("11.3 - Wallet B opens short via wrapper (different browser context) -
     await page.getByRole("button", { name: "Connect Wallet" }).click();
     await expect(page.getByText(/0x7099.*79C8/)).toBeVisible({ timeout: 10000 });
 
-    await expect(page.getByText("Short")).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/130/)).toBeVisible();
+    // Wait for positions to load: the Open tab count updates once usePositions fetches data.
+    await expect(page.getByRole("button", { name: /Open \(1\)/ })).toBeVisible({ timeout: 30000 });
+
+    const shortCard = page.locator('.rounded-xl.border.border-card-border').filter({ hasText: /Short/ });
+    await expect(shortCard).toBeVisible();
+    await expect(shortCard.getByText("130", { exact: true })).toBeVisible();
 
     await context.close();
   });

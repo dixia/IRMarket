@@ -162,7 +162,7 @@ export function useAllowance(token: string, owner: `0x${string}` | undefined, sp
     abi: ERC20_ABI,
     functionName: "allowance",
     args: [owner ?? "0x0000000000000000000000000000000000000000", (spender ?? "") as `0x${string}`],
-    query: { enabled: isFullyConfigured && ok },
+    query: { enabled: isFullyConfigured && ok, refetchInterval: 2000 },
   });
 }
 
