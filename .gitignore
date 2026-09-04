@@ -49,3 +49,9 @@ docs/IRMarket Pitch Deck.pptx
 docs/~$Monoracle.pptx
 
 .vercel
+
+# IRMarket bot / testnet live-run artifacts
+irmarket_run.log
+irmarket_*.log
+docs/audit/agent_logs/*
+!docs/audit/agent_logs/.gitkeep
