@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {IRMarket} from "../IRMarket.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract ReentrantCallback {
+    IRMarket public immutable market;
+
+    constructor(address _market) {
+        market = IRMarket(_market);
+    }
+
+    function approve(address token, address spender, uint256 amount) external {
+        IERC20(token).approve(spender, amount);
+    }
+
+    function onVeto() external {
+        market.openLong(1, 1);
+    }
+}

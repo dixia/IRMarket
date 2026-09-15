@@ -26,6 +26,29 @@ contract MonoracleMock is IMonoracle {
     mapping(uint256 => QuoteData) public quotes_;
     mapping(bytes32 => uint256) public latestValidQuoteId_;
 
+    // Reentrancy test hook: optional callback during veto
+    address public callbackTarget;
+    uint256 public callbackQuoteId;
+
+    function setCallback(address target, uint256 quoteId) external {
+        callbackTarget = target;
+        callbackQuoteId = quoteId;
+    }
+
+    function _maybeCallback(uint256 quoteId) internal {
+        if (callbackTarget != address(0) && callbackQuoteId == quoteId) {
+            (bool ok, bytes memory data) = callbackTarget.call(abi.encodeWithSignature("onVeto()"));
+            if (!ok) {
+                if (data.length == 0) {
+                    revert("callback failed");
+                }
+                assembly {
+                    revert(add(data, 32), mload(data))
+                }
+            }
+        }
+    }
+
     error ExpiryMustBeFuture();
     error QuoteDoesNotExist();
     error QuoteNotActive();
@@ -69,6 +92,7 @@ contract MonoracleMock is IMonoracle {
 
         // Long trade: verifier pays quoteAmount into contract, receives baseAmount from contract
         IERC20(q.quoteToken).safeTransferFrom(msg.sender, address(this), q.quoteAmount);
+        _maybeCallback(quoteId);
         IERC20(q.baseToken).safeTransfer(msg.sender, q.baseAmount);
 
         q.status = QuoteStatus.VETOED_UNDERPRICED;
@@ -83,6 +107,7 @@ contract MonoracleMock is IMonoracle {
 
         // Short trade: verifier pays baseAmount into contract, receives quoteAmount from contract
         IERC20(q.baseToken).safeTransferFrom(msg.sender, address(this), q.baseAmount);
+        _maybeCallback(quoteId);
         IERC20(q.quoteToken).safeTransfer(msg.sender, q.quoteAmount);
 
         q.status = QuoteStatus.VETOED_OVERPRICED;
@@ -108,7 +133,7 @@ contract MonoracleMock is IMonoracle {
         QuoteData storage q = quotes_[quoteId];
         if (q.provider != msg.sender) revert NotQuoteProvider();
         if (q.status == QuoteStatus.ACTIVE) revert VerificationWindowActive();
-        if (q.status == QuoteStatus.SETTLED_VALID) revert NotWithdrawable();
+        if (q.status == QuoteStatus.SETTLED_WITHDRAWN) revert NotWithdrawable();
 
         uint256 withdrawBase;
         uint256 withdrawQuote;

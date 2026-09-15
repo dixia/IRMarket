@@ -236,7 +236,7 @@ describe("IRMarket — fee wrapper (D-11/D-16)", function () {
       .to.be.revertedWithCustomError(market, "QuoteWindowExpired");
   });
 
-  it("passes through unsafe conditions: allowance, already-vetoed, reentrancy guard", async function () {
+  it("reverts on missing allowance and already-vetoed quote", async function () {
     await submitQuote();
 
     // trader without market allowance -> safeTransferFrom bubbles ERC20InsufficientAllowance
@@ -251,10 +251,50 @@ describe("IRMarket — fee wrapper (D-11/D-16)", function () {
     await expect(market.connect(trader).openShort(1, 1))
       .to.be.revertedWithCustomError(market, "QuoteNotActive");
   });
+
+  it("nonReentrant blocks reentrant callback from oracle", async function () {
+    const Helper = await ethers.getContractFactory("ReentrantCallback");
+    const helper = await Helper.deploy(market.target);
+
+    await quote.connect(trader).transfer(helper.target, 101n * E18);
+    await helper.approve(quote.target, market.target, ethers.MaxUint256);
+
+    const freshExpiry = (await currentBlock()) + 600;
+    await market.createMarket(base.target, quote.target, mm.address, freshExpiry, 100n);
+    await oracle.connect(provider).submitQuote(base.target, quote.target, 1n * E18, 100n * E18, freshExpiry);
+    await oracle.setCallback(helper.target, 1);
+
+    await expect(market.connect(trader).openLong(2, 1))
+      .to.be.revertedWithCustomError(market, "ReentrancyGuardReentrantCall");
+  });
+
+  it("reverts openShort past the quote expiry window", async function () {
+    await oracle.connect(provider).submitQuote(
+      base.target, quote.target, 1n * E18, 100n * E18, (await currentBlock()) + 2
+    );
+    await mineBlocks(3);
+
+    await expect(market.connect(trader).openShort(1, 1))
+      .to.be.revertedWithCustomError(market, "QuoteWindowExpired");
+  });
+
+  it("accepts feeBps=9999 (boundary)", async function () {
+    await market.createMarket(base.target, quote.target, mm.address, expiry, 9999n);
+    await oracle.connect(provider).submitQuote(base.target, quote.target, 1n * E18, 100n * E18, expiry);
+    await market.connect(trader).openLong(2, 1);
+    expect((await market.markets(2)).feeBps).to.equal(9999n);
+  });
+
+  it("reverts double veto via wrapper on same quote", async function () {
+    await submitQuote();
+    await market.connect(trader).openLong(1, 1);
+    await expect(market.connect(trader).openShort(1, 1))
+      .to.be.revertedWithCustomError(market, "QuoteNotActive");
+  });
 });
 
 describe("IRMarket — zero-sum invariant (D-10)", function () {
-  it("trader profit mirrors provider loss on a vetoed quote", async function () {
+  it("D-10 zero-sum invariant: long trade, fee=0", async function () {
     const [c, p, t, m] = await ethers.getSigners();
 
     const Oracle = await ethers.getContractFactory("MonoracleMock");

@@ -114,19 +114,51 @@ describe("MonoracleMock — per-quote expiry window", function () {
     await expect(oracle.connect(verifier).vetoUnderpriced(1)).to.be.revertedWithCustomError(oracle, "VerificationWindowExpired");
   });
 
-  it("settles after expiry and feeds getLatestPrice", async function () {
+  it("allows veto exactly at expiryBlock (inclusive)", async function () {
+    const block = BigInt(await currentBlock());
+    const expiryBlock = block + 10n;
+    await submitQuote(expiryBlock);
+
+    const afterSubmit = BigInt(await currentBlock());
+    const blocksToMine = Number(expiryBlock - 1n - afterSubmit);
+    if (blocksToMine > 0) {
+      await mineBlocks(blocksToMine);
+    }
+
+    const tx = await oracle.connect(verifier).vetoUnderpriced(1);
+    await expect(tx).to.emit(oracle, "QuoteVetoedUnderpriced").withArgs(1n, verifier.address);
+  });
+
+  it("settles a valid quote and provider withdraws only own collateral", async function () {
     const block = await currentBlock();
-    await submitQuote(block + 2);
+    await submitQuote(block + 10);
+    await mineBlocks(11);
+    await oracle.settleValidQuote(1);
+    await oracle.connect(provider).withdrawProviderFunds(1);
 
-    const [, , existsBefore] = await oracle.getLatestPrice(base.target, quote.target);
-    expect(existsBefore).to.equal(false);
+    expect(await base.balanceOf(provider.address)).to.equal(1000n * E18);
+    expect(await quote.balanceOf(provider.address)).to.equal(100000n * E18);
+  });
 
-    await mineBlocks(3);
+  it("reverts double withdrawal of provider funds", async function () {
+    const block = await currentBlock();
+    await submitQuote(block + 10);
+    await mineBlocks(11);
+    await oracle.settleValidQuote(1);
+    await oracle.connect(provider).withdrawProviderFunds(1);
+
+    await expect(oracle.connect(provider).withdrawProviderFunds(1))
+      .to.be.revertedWithCustomError(oracle, "NotWithdrawable");
+  });
+
+  it("reverts withdrawProviderFunds by non-provider", async function () {
+    const block = await currentBlock();
+    await submitQuote(block + 10);
+    await mineBlocks(11);
     await oracle.settleValidQuote(1);
 
-    const [price, , exists] = await oracle.getLatestPrice(base.target, quote.target);
-    expect(exists).to.equal(true);
-    expect(price).to.equal(100n * E18);
+    await expect(oracle.connect(verifier).withdrawProviderFunds(1))
+      .to.be.revertedWithCustomError(oracle, "NotQuoteProvider");
   });
 
   it("last-settled quote wins the canonical price (final quote = mark)", async function () {
