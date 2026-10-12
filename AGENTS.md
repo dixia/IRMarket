@@ -26,12 +26,13 @@ This repo build on top of the Monoracle project (`github.com/dixia/monoracle`).
 | `docs/` | Design docs, product docs, workflows, DeltaV records (some gitignored) |
 | `docs/product/` | Product requirements (PRD), demo scripts, work logs |
 | `docs/design/` | Smart contract tech spec, web tech design |
-| `docs/design/lp-pool-tech-spec.md` | **LP 资金池设计（V1.0 draft，未实现）**：vault / capped linear payoff / 风控参数 / PriceAdapter；§1.4 = MVP 范围 |
-| `docs/design/lp-pool-mvp-impl-plan.md` | **LP pool MVP 实施计划**（对应 spec §1.4，M0–M4）：任务分解 / 测试计划 / 已知风险 |
+| `docs/design/lp-pool-tech-spec.md` | **LP 资金池设计（V1.0 draft）**：目标设计 + §1.4 MVP 范围（**MVP 已实现**：`contracts/IRMarketVault.sol`）；vault / capped linear payoff / 风控参数 / PriceAdapter |
+| `docs/design/lp-pool-mvp-impl-plan.md` | **LP pool MVP 实施计划**（对应 spec §1.4，M0–M5 **已完成**）：任务分解 / 测试计划 / 已知风险 |
 
-> ⚠️ 两套语义勿混用：当前代码是 **V0.9 veto-market**（Monoracle 既是价格也是撮合场所，交易 = veto，
-> bot 双边抵押当对手方，**无资金池**）。`docs/design/lp-pool-tech-spec.md` 是另一条路径：Monoracle **只做价格**，
-> 交易 = vault 持仓，池子做对手方。不要在同一笔持仓里混用，也不要让 vault 用它自己提交的报价结算。
+> ⚠️ 两套语义勿混用：**V0.9 veto-market**（已部署；Monoracle 既是价格也是撮合场所，交易 = veto，
+> bot 双边抵押当对手方，**无资金池**）与 **LP pool MVP**（已实现：`contracts/IRMarketVault.sol`；
+> Monoracle **只做价格**，交易 = vault 持仓，池子做对手方）。不要在同一笔持仓里混用，也不要让 vault
+> 用它自己提交的报价结算。
 
 
 

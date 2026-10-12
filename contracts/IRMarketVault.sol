@@ -16,6 +16,10 @@ import {IMonoracle} from "./IMonoracle.sol";
  *         `pendingPayout <= balance`, so the pool can never be involuntarily insolvent.
  *         Price manipulation defence is out of scope here (see spec §8) — this is a
  *         demo of the payoff/settlement accounting only.
+ *
+ *         Accepted MVP limitations (impl-plan §6): settlement marks at call-time price
+ *         (American option), a pathological overflow strands a position, and quote tokens
+ *         sent directly to the vault are not counted and cannot be swept.
  */
 contract IRMarketVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -50,7 +54,8 @@ contract IRMarketVault is ReentrancyGuard {
     address public immutable quoteToken;
     uint256 public immutable feeBps;
 
-    uint256 public balance;        // cached quote balance of the vault
+    uint256 public balance;        // cached quote balance; direct token donations are NOT
+                                   // counted and cannot be swept (see header @dev)
     uint256 public pendingPayout;  // worst-case obligation over OPEN positions
     uint256 public totalShares;    // LP shares outstanding
 
@@ -62,6 +67,7 @@ contract IRMarketVault is ReentrancyGuard {
     error ZeroTenor();
     error PriceUnavailable();
     error Insolvent();
+    error DepositAtZeroEquity();
     error InsufficientShares();
     error NotOpen();
     error NotExpired();
@@ -114,7 +120,10 @@ contract IRMarketVault is ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         uint256 eq = equity();
         uint256 supply = totalShares;
-        sharesMinted = (supply == 0 || eq == 0) ? amount : (amount * supply) / eq;
+        // With existing shares but zero equity (fully reserved or fully lost), a 1:1 mint
+        // would silently donate most of `amount` to incumbent LPs — refuse instead.
+        if (supply > 0 && eq == 0) revert DepositAtZeroEquity();
+        sharesMinted = supply == 0 ? amount : (amount * supply) / eq;
 
         IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), amount);
         balance += amount;
@@ -184,6 +193,10 @@ contract IRMarketVault is ReentrancyGuard {
         );
     }
 
+    /// @dev Permissionless. Marks at the canonical price at *call* time, not at expiry, so a
+    ///      position is effectively American — the holder may settle late when the price is
+    ///      favourable. Accepted MVP risk (impl-plan §6); V1 pins settlement to the expiry
+    ///      window (spec §9.3).
     function settlePosition(uint256 positionId) external nonReentrant returns (uint256 payout) {
         Position storage p = _positions[positionId];
         if (p.status != Status.OPEN) revert NotOpen();

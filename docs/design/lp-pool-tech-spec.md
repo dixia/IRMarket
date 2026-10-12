@@ -1,8 +1,8 @@
 # IRMarket — LP Pool Technical Specification (V1.0, draft for implementation)
 
 > **Status:** Draft (V1.0). This document is the **target design**. A reduced **MVP cut**
-> is defined in §1.4 and is partially implemented (`contracts/IRMarketVault.sol`,
-> `test/IRMarketVault.test.js`); the implementation plan lives in
+> is defined in §1.4 and is **implemented** (`contracts/IRMarketVault.sol`, unit + E2E tests,
+> `script/deploy-vault.js`, `script/vault-demo.js`); the implementation plan lives in
 > `docs/design/lp-pool-mvp-impl-plan.md`.
 >
 > **Companion documents**
@@ -85,6 +85,16 @@ Monoracle's canonical price* — in a few hours, and is what the implementation 
   settle until a price appears — it is stuck, not refunded.
 - No admission caps beyond the global solvency invariant: one large position can consume
   all free capital (it still cannot make the pool insolvent, by the invariant).
+- **Settlement-timing optionality (American option).** `settlePosition` marks at the
+  canonical price at *call* time, not at expiry, so a holder can settle late when the price
+  is favourable; with a flat fee and a capped upside this is mispriced against the pool. Not
+  covered by the manipulation risk above (the V1 adapter bounds staleness, not optionality).
+  V1 must pin settlement to the expiry window (§9.3).
+- **Overflow can strand a position.** A pathological price/amount reverts `_payout` (checked
+  math); the position then never settles and its `maxPayout` stays reserved. Cost is ~1:1
+  with the trader's own premium, so it is a bounded grief, not a solvency break.
+- **Direct donations are stranded.** Quote tokens sent straight to the vault are not counted
+  in `balance` and cannot be swept.
 
 ---
 
@@ -306,6 +316,10 @@ optionally burn a minimal seed on creation to make inflation attacks uneconomic 
 deposit:  shares = amount × totalShares / equity      (equity measured before the deposit)
 burn:     amount = shares × equity / totalShares      (equity measured at claim, not request)
 ```
+
+When `totalShares > 0` but `equity == 0` (the pool is fully reserved or fully lost), a 1:1
+mint would silently donate most of a new deposit to incumbent LPs; the MVP `deposit` reverts
+`DepositAtZeroEquity` instead.
 
 ### 6.4 Withdrawal queue (LP-05)
 
@@ -940,8 +954,9 @@ track (P0–P6) is the full design.
 | **M0** | Vault skeleton: constructor, `deposit`/`withdraw`, conservative equity, share math | `contracts/IRMarketVault.sol` | done |
 | **M1** | Product: capped linear LONG/SHORT, payoff §4.2, solvency invariant | `contracts/IRMarketVault.sol` | done |
 | **M2** | Settlement at expiry off `IMonoracle.getLatestPrice` | `contracts/IRMarketVault.sol` | done |
-| **M3** | Tests: deposit/shares, long cap, flat, short, pre-expiry, insolvency, no-price, withdraw | `test/IRMarketVault.test.js` | done (8 passing) |
-| **M4** | Demo glue: deploy script + scripted price→open→settle walkthrough | `script/deploy-vault.js`, `script/vault-demo.js` | **open** |
+| **M3** | Tests: deposit/shares, long cap, flat, short, pre-expiry, insolvency, no-price, withdraw | `test/IRMarketVault.test.js` | done (21 passing) |
+| **M4** | Demo glue: deploy script + scripted price→open→settle walkthrough | `script/deploy-vault.js`, `script/vault-demo.js` | done |
+| **M5** | Hardening + E2E: payoff boundaries, dilution, fuzz invariants, overflow; contract-level E2E suite | `test/IRMarketVault.test.js`, `test/IRMarketVault.e2e.test.js` | done (54 passing total, 9 E2E) |
 
 ### 15.2 V1 track (full design)
 

@@ -226,6 +226,20 @@ describe("IRMarketVault — MVP LP pool", function () {
     await assertInvariants();
   });
 
+  it("deposit reverts at zero equity with existing shares (§6.3)", async function () {
+    await setPrice(100n * E18);
+    // Reserve the pool fully: LP 98 + trader D=100 → balance 198 == pendingPayout 198 → equity 0.
+    await vault.connect(lp).deposit(98n * E18);
+    await vault.connect(trader).openPosition(LONG, 100n * E18, 10n);
+    expect(await vault.equity()).to.equal(0n);
+    expect(await vault.totalShares()).to.equal(98n * E18);
+
+    // A 1:1 mint here would donate most of the deposit to incumbent LPs, so it must revert.
+    await expect(vault.connect(lp2).deposit(10n * E18))
+      .to.be.revertedWithCustomError(vault, "DepositAtZeroEquity");
+    await assertInvariants();
+  });
+
   it("deposit-dilution window (§6.5): newcomer buys at the dipped equity", async function () {
     await setPrice(100n * E18);
     await vault.connect(lp).deposit(1000n * E18); // LP1: 1000 shares
@@ -340,7 +354,7 @@ describe("IRMarketVault — MVP LP pool", function () {
     // must fail the test (e.g. an unexpected ERC20 revert or a Panic). In this stack a
     // revert surfaces with the 4-byte custom-error selector in `err.data`, which we
     // decode against the vault ABI.
-    const EXPECTED_REVERTS = new Set(["Insolvent", "NotExpired", "NotOpen", "PriceUnavailable"]);
+    const EXPECTED_REVERTS = new Set(["Insolvent", "NotExpired", "NotOpen", "PriceUnavailable", "DepositAtZeroEquity"]);
     const isExpectedRevert = (err) => {
       if (typeof err?.data !== "string") return false;
       try {

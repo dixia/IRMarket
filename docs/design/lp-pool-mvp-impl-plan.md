@@ -104,7 +104,8 @@ payout = N + pnl                                        // ∈ [0, 2N]
 
 // LP shares (conservative equity):
 equity     = balance − pendingPayout
-shares_out = (totalShares == 0 || equity == 0) ? amount : amount * totalShares / equity
+shares_out = totalShares == 0 ? amount : amount * totalShares / equity
+             // reverts DepositAtZeroEquity when totalShares > 0 && equity == 0 (spec §6.3)
 amount_out = shares_in * equity / totalShares
 
 // equity behaviour (spec §6.5): dips at open, recovers at settle
@@ -121,10 +122,10 @@ decimals (spec §13.1). Fee rounds down; payout rounds down (spec §5).
 
 | Task | Deliverable | Acceptance |
 |---|---|---|
-| **M0–M3** ✅ | Vault + tests | `npx hardhat test test/IRMarketVault.test.js` → 8 passing |
-| **M4.1** | `script/deploy-vault.js` — deploy tokens (or reuse env), oracle, vault; wire approvals | running locally connects and reads `vault.equity()` |
-| **M4.2** | `script/vault-demo.js` — scripted walkthrough: LP deposit → publish+settle quote at `S0` → open LONG → publish+settle quote at `S1` → settle → log trader PnL + LP equity delta | exits 0; logs match the §3.2 formulas |
-| **M5 (hardening)** | Add the tests in §5.2 | green; invariants hold |
+| **M0–M3** ✅ | Vault + tests | `npx hardhat test test/IRMarketVault.test.js` → 21 passing |
+| **M4.1** ✅ | `script/deploy-vault.js` — deploy tokens (or reuse env), oracle, vault; wire approvals | running locally connects and reads `vault.equity()` |
+| **M4.2** ✅ | `script/vault-demo.js` — scripted walkthrough: LP deposit → publish+settle quote at `S0` → open LONG → publish+settle quote at `S1` → settle → log trader PnL + LP equity delta | exits 0; logs match the §3.2 formulas |
+| **M5 (hardening + E2E)** ✅ | The §5.2 tests + the contract-level E2E suite | `npx hardhat test` 54 passing; `npm run test:e2e` 9 passing |
 
 **M4 detail — the price step.** The vault only sees the canonical price once a Monoracle
 quote *settles*. The demo must therefore: `submitQuote(base, quote, baseAmount, quoteAmount,
@@ -210,6 +211,22 @@ npm run test:e2e                              # E2E suite: test/IRMarketVault.e2
    newcomer's worst case is roughly break-even). Accepted for the demo; a mitigation
    (marked equity / epoch accounting / deposit delay) must be chosen before V1 (LP-D14).
    Tested explicitly in M5 so the behaviour is at least visible.
+9. **Settlement-timing optionality (American option).** `settlePosition` marks at the
+   canonical price at *call* time, not at expiry, so a holder can settle late when the price
+   is favourable — mispriced against the pool for a flat fee and a capped upside. This is
+   **not** the same as risk 1: the V1 adapter bounds staleness, not optionality. Accepted for
+   the MVP; V1 must pin settlement to the expiry window (spec §9.3). Note `latestValidQuoteId`
+   exposes only the *latest* quote, so a true "first quote at/after expiry" rule needs an
+   oracle-side change.
+10. **Overflow-panic strands a position.** A pathological price/amount reverts `_payout`
+    with Panic `0x11` (checked math); the position can never settle, so its `maxPayout` stays
+    locked and LP equity is reduced forever. Griefing cost is ~1:1 with the trader's own
+    premium (they forfeit it too), so it is a bounded grief, not a solvency break; V1
+    `maxDeposit`/`maxTenorBlocks` bound it. (M5 has the overflow test.)
+11. **Direct quote-token donations are stranded.** Tokens sent straight to the vault are not
+    counted in the cached `balance` and there is no sweep, so they are unrecoverable and
+    break the `token.balanceOf == balance` lockstep the tests assert. NatSpec-noted in the
+    contract.
 
 **Boundary note.** The spec §4.2 `S = 0` row is the continuous limit, not reachable: a canonical
 `settlePrice == 0` reverts `PriceUnavailable`, and flooring keeps `payout` strictly inside
