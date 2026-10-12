@@ -1,5 +1,7 @@
 // Formatting helpers for the 1e18 fixed-point prices/amounts used on Monad.
 
+import { parseUnits } from "viem";
+
 export const PRICE_DECIMALS = 18n;
 
 /** price is quote-per-base in 1e18 fixed-point. */
@@ -48,6 +50,17 @@ export function formatPnl(pnl: bigint | undefined): string {
   const scaled = (pnl < 0n ? -pnl : pnl) / 10n ** 14n;
   const s = toNumberString(scaled, 4);
   return `${pnl < 0n ? "-" : "+"}${s}`;
+}
+
+/** Parse a decimal string into a token amount. Returns undefined on empty/invalid input. */
+export function parseAmount(input: string, decimals = 18): bigint | undefined {
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+  try {
+    return parseUnits(trimmed, decimals);
+  } catch {
+    return undefined;
+  }
 }
 
 export function shortenAddress(address: string): string {

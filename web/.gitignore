@@ -44,3 +44,5 @@ web/tests/helpers/addresses.json
 next-env.d.ts
 .vercel
 .env*
+# keep the example (no secrets) so NEXT_PUBLIC_* config is documented in-repo
+!.env.local.example

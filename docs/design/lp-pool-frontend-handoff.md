@@ -29,20 +29,29 @@ different flows (see `AGENTS.md`).
 
 ## 1. Deployed addresses (Monad testnet)
 
+The vault **reuses the V0.9 app stack** — the same tokens the faucet mints and the same oracle
+the V0.9 bot publishes to — so the frontend's "Claim test tokens" funds vault deposits and the
+vault marks to a live canonical price.
+
 | Contract | Address |
 |---|---|
-| `IRMarketVault` | `0x8412c4DeDdE1992179aD6D6D8680b35b68b891D7` |
-| Monoracle (test oracle, `MonoracleMock`) | `0x863763A2610A287cCc74C5325bcf9a17C1411Dfe` |
-| Base token (LLM) | `0x7309EBb6E3b329e5faBEAC6d1A8d6121Ef5A7c3E` |
-| Quote token (HKD) | `0x27893923639cF7C287688244389ba38E9f1aA0B5` |
+| `IRMarketVault` | `0x8995b6524f7809d9472dff0dDD06512DA5BCe380` |
+| Monoracle (V0.9 app oracle) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
+| Base token (LLM) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
+| Quote token (HKD) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |
 | Deployer / operator | `0xF5Cf3950CA8055408648Ce5c155B2b3967269fcE` |
 
 - These are also written to `deployment-vault.json` (repo root, gitignored) by
   `script/deploy-vault-rpc.js`.
+- **Reuse mode (what is deployed above):** set `ORACLE_ADDRESS`, `BASE_TOKEN` and `QUOTE_TOKEN`
+  and the script deploys **only** the vault against that existing stack (it skips the smoke
+  test). Without those env vars it deploys a fresh `MonoracleMock` + `MockERC20` pair instead.
 - **Local dev:** run `anvil` (Foundry, in WSL) then `node script/deploy-vault-rpc.js` — it
   deploys a fresh stack and prints addresses (anvil chainId `31337`, RPC `http://127.0.0.1:8545`).
-- The vault was deployed and its full lifecycle smoke-tested on both anvil and Monad
-  (LP deposit → open LONG → price up → settle → withdraw; payout `148.5`, LP equity `951.5`).
+- The standalone stack was lifecycle smoke-tested on both anvil and Monad (LP deposit → open
+  LONG → price up → settle → withdraw; payout `148.5`, LP equity `951.5`). The deployed vault
+  above is wired to the V0.9 oracle/tokens, so its canonical price is whatever the V0.9 bot
+  last settled.
 
 ---
 
@@ -209,7 +218,13 @@ withdraw:  amount = shares × equity / totalShares  // floor
 ## 5. Reading data (viem patterns — reuse existing conventions)
 
 - Use `usePublicClient()` + `readContract` (see `web/src/hooks/usePositions.ts`,
-  `useBalances.ts`). Return tuples **positionally**.
+  `useBalances.ts`). Multi-output functions decode to a positional array; a single **struct**
+  output (e.g. `positions(id)`) decodes to a **named object** in this viem version
+  (`res.owner`, not `res[0]`).
+- **Do not call `publicClient.multicall()`** — `web/src/lib/wagmi.ts` sets `contracts: {}` on
+  the chain, so viem throws `multicallAddress is required` in the browser. Use plain
+  `readContract` (or wagmi's `useReadContracts`, which falls back to individual reads). The
+  vault hooks (`useVault.ts`, `useVaultPositions.ts`) were fixed for exactly this.
 - **`eth_getLogs` on Monad testnet is capped at ~100 blocks** — event history must be fetched
   in chunked windows and in parallel (existing `usePositions.ts` uses `LOG_CHUNK_BLOCKS = 100n`
   with a `LOOKBACK_BLOCKS` scan and `Promise.all`). For MVP positions, prefer the

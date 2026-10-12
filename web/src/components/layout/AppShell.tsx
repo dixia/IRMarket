@@ -11,6 +11,7 @@ import { FaucetModal } from "@/components/faucet/FaucetModal";
 const NAV = [
   { href: "/", label: "Market" },
   { href: "/positions", label: "Positions" },
+  { href: "/vault", label: "Vault" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

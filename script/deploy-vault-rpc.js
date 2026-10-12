@@ -29,7 +29,14 @@ const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const FEE_BPS = BigInt(process.env.FEE_BPS || "100");
-const RUN_SMOKE = process.env.SMOKE !== "0";
+// Reuse an existing oracle/token stack (deploy ONLY the vault). Set ORACLE_ADDRESS,
+// BASE_TOKEN and QUOTE_TOKEN together to point the vault at a live market (e.g. the V0.9
+// test tokens) instead of deploying a fresh MonoracleMock + MockERC20 pair.
+const REUSE_ORACLE = process.env.ORACLE_ADDRESS;
+const REUSE_BASE = process.env.BASE_TOKEN;
+const REUSE_QUOTE = process.env.QUOTE_TOKEN;
+const REUSE = Boolean(REUSE_ORACLE && REUSE_BASE && REUSE_QUOTE);
+const RUN_SMOKE = process.env.SMOKE !== "0" && !REUSE;
 const E18 = 10n ** 18n;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -61,9 +68,19 @@ async function main() {
   }
 
   console.log("\nDeploying...");
-  const oracle = await deploy("MonoracleMock", "contracts/test/MonoracleMock.sol/MonoracleMock.json");
-  const base = await deploy("MockERC20 LLM", "contracts/MockERC20.sol/MockERC20.json", ["Liuliumei", "LLM", 18]);
-  const quote = await deploy("MockERC20 HKD", "contracts/MockERC20.sol/MockERC20.json", ["HKD", "HKD", 18]);
+  let oracle, base, quote;
+  if (REUSE) {
+    console.log(`  reusing oracle ${REUSE_ORACLE}`);
+    console.log(`  reusing base   ${REUSE_BASE}`);
+    console.log(`  reusing quote  ${REUSE_QUOTE}`);
+    oracle = { address: REUSE_ORACLE, abi: getArtifact("contracts/test/MonoracleMock.sol/MonoracleMock.json").abi };
+    base = { address: REUSE_BASE, abi: getArtifact("contracts/MockERC20.sol/MockERC20.json").abi };
+    quote = { address: REUSE_QUOTE, abi: getArtifact("contracts/MockERC20.sol/MockERC20.json").abi };
+  } else {
+    oracle = await deploy("MonoracleMock", "contracts/test/MonoracleMock.sol/MonoracleMock.json");
+    base = await deploy("MockERC20 LLM", "contracts/MockERC20.sol/MockERC20.json", ["Liuliumei", "LLM", 18]);
+    quote = await deploy("MockERC20 HKD", "contracts/MockERC20.sol/MockERC20.json", ["HKD", "HKD", 18]);
+  }
   const vault = await deploy("IRMarketVault", "contracts/IRMarketVault.sol/IRMarketVault.json", [
     oracle.address,
     base.address,
@@ -137,6 +154,7 @@ async function main() {
     quoteToken: quote.address,
     vault: vault.address,
     feeBps: Number(FEE_BPS),
+    reusedExistingStack: REUSE,
     txHashes: { oracle: oracle.txHash, baseToken: base.txHash, quoteToken: quote.txHash, vault: vault.txHash },
     timestamp: new Date().toISOString(),
   };

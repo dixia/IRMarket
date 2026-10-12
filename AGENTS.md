@@ -72,7 +72,8 @@ Monad veto-arbitrage 长/短市场：
 - 函数 selector 用 ethers 现算，勿手写。
 - 本地 env 在 `web/.env.local`（gitignored）。
 - 改动后先 `tsc`+`lint`+`build` 再部署；Vercel 链上 chunk 验证耗时，先本地验证。
-- Vercel 项目 `irmarket`（h-fbf5），域名 `irmarket.xyz`。链接后从 **repo root** 部署：`npx vercel --prod --yes`；**禁止**在 repo root 创建 `.vercel` 目录（会覆盖 `web` root directory 设置导致 "Root Directory does not exist" 错误）。
+- Vercel 项目 `irmarket`（h-fbf5），域名 `irmarket.xyz`，链接文件在 `web/.vercel`。**在 `web/` 目录**部署：`npx vercel --prod --yes`（**勿从 repo root 部署**：CLI 不套用 dashboard 的 Root Directory，会直接上传 repo root 并报 `No Next.js version detected`）。**禁止**在 repo root 创建 `.vercel` 目录。
+- 新增/修改 `NEXT_PUBLIC_*`（如 `NEXT_PUBLIC_VAULT_ADDRESS`）：`web/` 下执行 `"<value>" | npx vercel env add <NAME> production`（现有变量仅 Production 作用域）；改后必须重新 `--prod` 部署，值才会内联进客户端 chunk。
 
 ### Bot (bot/verifier.py)
 - 引号按轮次归属：quote/settle/restock 必须按 `expiryBlock == market.expiryBlock` 过滤，禁止只按交易对匹配（曾因只按 pair 把活跃轮引号当到期引号 settle 而崩溃）。

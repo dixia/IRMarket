@@ -92,6 +92,25 @@ export default async function globalSetup() {
   );
   console.log(`[Setup] Seeded quoteId=${quoteId}`);
 
+  // Publish a settled canonical price for the vault. The seeded quote above expires only after
+  // ~500 blocks (specs 11/12 rely on staying below block 500), so submit a dedicated quote with
+  // a near-term expiry and settle it. getLatestPrice then returns 130 for the (base, quote) pair.
+  console.log("[Setup] Publishing a settled canonical price for the vault...");
+  const { settleQuote } = await import("./helpers/bot.js");
+  const { mineBlocks } = await import("./helpers/mine.js");
+  const canonicalBlock = await publicClient.getBlockNumber();
+  const canonicalQuoteId = await seedQuote(
+    deployed.oracle,
+    deployed.baseToken,
+    deployed.quoteToken,
+    1n * 10n ** 18n,
+    130n * 10n ** 18n,
+    canonicalBlock + 1n
+  );
+  await mineBlocks(2);
+  await settleQuote(deployed.oracle, canonicalQuoteId);
+  console.log(`[Setup] Settled canonical quoteId=${canonicalQuoteId} (price 130)`);
+
   // Write .env.local
   const webDir = path.resolve(import.meta.dirname!, "..");
   const envPath = path.join(webDir, ".env.local");
@@ -103,6 +122,7 @@ export default async function globalSetup() {
     `NEXT_PUBLIC_MARKET_ADDRESS=${deployed.market}`,
     `NEXT_PUBLIC_BASE_TOKEN=${deployed.baseToken}`,
     `NEXT_PUBLIC_QUOTE_TOKEN=${deployed.quoteToken}`,
+    `NEXT_PUBLIC_VAULT_ADDRESS=${deployed.vault}`,
     `NEXT_PUBLIC_EXPIRY_SECONDS=300`,
     "",
   ].join("\n");
@@ -120,6 +140,7 @@ export default async function globalSetup() {
   console.log(`  MARKET:  ${deployed.market}`);
   console.log(`  BASE:    ${deployed.baseToken}`);
   console.log(`  QUOTE:   ${deployed.quoteToken}`);
+  console.log(`  VAULT:   ${deployed.vault}`);
   console.log(`  MARKETID: ${marketId}`);
 
   (globalThis as any).__anvilProcess = anvilProcess;

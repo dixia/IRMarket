@@ -32,6 +32,11 @@ export const isFullyConfigured =
 
 export const hasWrapper = MARKET_ADDRESS_RAW !== "";
 
+// LP-pool vault (IRMarketVault). Empty → vault UI shows a "not configured" state.
+export const VAULT_ADDRESS_RAW = process.env.NEXT_PUBLIC_VAULT_ADDRESS || "";
+export const VAULT_ADDRESS = VAULT_ADDRESS_RAW as `0x${string}`;
+export const hasVault = VAULT_ADDRESS_RAW !== "";
+
 export const GAS_APPROVE = 60_000n;
 export const GAS_VETO = 300_000n;
 export const GAS_WRAPPER = 450_000n;

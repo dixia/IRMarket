@@ -13,6 +13,15 @@ export type TxState =
 export function mapTransactionError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   const map: Array<[RegExp, string]> = [
+    // IRMarketVault (LP-pool MVP) errors — lp-pool-frontend-handoff §8
+    [/PriceUnavailable/, "Waiting for a price — try again shortly."],
+    [/Insolvent/, "Pool capacity insufficient for this size."],
+    [/DepositAtZeroEquity/, "The pool is fully reserved; deposits are paused until positions settle."],
+    [/InsufficientShares/, "You don't have that many shares."],
+    [/NotExpired/, "This position hasn't expired yet."],
+    [/NotOpen/, "Already settled."],
+    [/ZeroAmount/, "Enter an amount greater than zero."],
+    [/ZeroTenor/, "Enter a tenor greater than zero."],
     // Monoracle errors
     [/VerificationWindowExpired|QuoteWindowExpired/, "Quote window passed — please select the latest quote"],
     [/VerificationWindowActive/, "Quote window is still open; cannot veto yet"],
@@ -60,7 +69,7 @@ export function TxStatusCard({ state }: { state: TxState }) {
     return (
       <div className="rounded-lg border border-bull/40 bg-bull/5 p-3 text-sm">
         <div className="font-semibold text-bull">{state.title ?? "Transaction succeeded"}</div>
-        {state.detail ?? <div className="text-text-dim">Assets were settled to your wallet instantly — view them on the positions page.</div>}
+        {state.detail ?? <div className="text-text-dim">Assets are in your wallet — view them on the positions page.</div>}
         <a className="mt-1 inline-block text-primary underline" href={explorerTxUrl(state.hash)} target="_blank" rel="noreferrer">
           View transaction {state.hash.slice(0, 10)}…
         </a>
