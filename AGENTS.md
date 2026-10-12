@@ -28,6 +28,7 @@ This repo build on top of the Monoracle project (`github.com/dixia/monoracle`).
 | `docs/design/` | Smart contract tech spec, web tech design |
 | `docs/design/lp-pool-tech-spec.md` | **LP 资金池设计（V1.0 draft）**：目标设计 + §1.4 MVP 范围（**MVP 已实现**：`contracts/IRMarketVault.sol`）；vault / capped linear payoff / 风控参数 / PriceAdapter |
 | `docs/design/lp-pool-mvp-impl-plan.md` | **LP pool MVP 实施计划**（对应 spec §1.4，M0–M5 **已完成**）：任务分解 / 测试计划 / 已知风险 |
+| `docs/design/lp-pool-frontend-handoff.md` | **LP pool 前端接入文档**（给 web 团队）：ABI / 数据模型 / UI 流程 / 已部署地址 / 已知限制 |
 
 > ⚠️ 两套语义勿混用：**V0.9 veto-market**（已部署；Monoracle 既是价格也是撮合场所，交易 = veto，
 > bot 双边抵押当对手方，**无资金池**）与 **LP pool MVP**（已实现：`contracts/IRMarketVault.sol`；

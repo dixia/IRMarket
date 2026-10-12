@@ -1,0 +1,154 @@
+/**
+ * deploy-vault-rpc.js — deploy the LP-vault MVP stack to any JSON-RPC EVM and smoke-test it.
+ *
+ * Defaults to a local Foundry anvil; works unchanged on Monad testnet via env vars:
+ *
+ *   local anvil :  node script/deploy-vault-rpc.js
+ *   monad       :  $env:RPC_URL="https://testnet-rpc.monad.xyz"
+ *                  $env:CHAIN_ID="10143"
+ *                  $env:PRIVATE_KEY="0x..."          # funded with MON
+ *                  node script/deploy-vault-rpc.js
+ *
+ * Env: RPC_URL (default http://127.0.0.1:8545), CHAIN_ID (31337), PRIVATE_KEY (optional on
+ * anvil — falls back to the node's unlocked account 0), FEE_BPS (100), SMOKE=0 to skip the
+ * lifecycle walkthrough, MINE=1 to force evm_mine on a non-31337 chain.
+ *
+ * Writes the addresses to `deployment-vault.json` (gitignored).
+ */
+import "dotenv/config";
+import assert from "node:assert/strict";
+import { ethers } from "ethers";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, "..");
+
+const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
+const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const FEE_BPS = BigInt(process.env.FEE_BPS || "100");
+const RUN_SMOKE = process.env.SMOKE !== "0";
+const E18 = 10n ** 18n;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function getArtifact(rel) {
+  return JSON.parse(fs.readFileSync(path.join(rootDir, "artifacts", rel), "utf8"));
+}
+
+async function main() {
+  const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
+  const net = await provider.getNetwork();
+  const signer = PRIVATE_KEY ? new ethers.Wallet(PRIVATE_KEY, provider) : await provider.getSigner(0);
+  const addr = await signer.getAddress();
+  const canMine = net.chainId === 31337n || process.env.MINE === "1";
+
+  console.log(`RPC ${RPC_URL}  chainId=${net.chainId}  deployer=${addr}`);
+  console.log(`Balance ${ethers.formatEther(await provider.getBalance(addr))} native`);
+
+  async function nextNonce() {
+    return BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
+  }
+  async function deploy(name, rel, args = []) {
+    const art = getArtifact(rel);
+    const factory = new ethers.ContractFactory(art.abi, art.bytecode, signer);
+    const tx = await factory.getDeployTransaction(...args);
+    const sent = await signer.sendTransaction({ ...tx, nonce: await nextNonce() });
+    const rc = await sent.wait();
+    console.log(`  ${name.padEnd(16)} ${rc.contractAddress}`);
+    return { address: rc.contractAddress, abi: art.abi, txHash: sent.hash };
+  }
+
+  console.log("\nDeploying...");
+  const oracle = await deploy("MonoracleMock", "contracts/test/MonoracleMock.sol/MonoracleMock.json");
+  const base = await deploy("MockERC20 LLM", "contracts/MockERC20.sol/MockERC20.json", ["Liuliumei", "LLM", 18]);
+  const quote = await deploy("MockERC20 HKD", "contracts/MockERC20.sol/MockERC20.json", ["HKD", "HKD", 18]);
+  const vault = await deploy("IRMarketVault", "contracts/IRMarketVault.sol/IRMarketVault.json", [
+    oracle.address,
+    base.address,
+    quote.address,
+    FEE_BPS,
+  ]);
+
+  const baseC = new ethers.Contract(base.address, base.abi, signer);
+  const quoteC = new ethers.Contract(quote.address, quote.abi, signer);
+  const oracleC = new ethers.Contract(oracle.address, oracle.abi, signer);
+  const vaultC = new ethers.Contract(vault.address, vault.abi, signer);
+
+  async function advanceBlocks(n) {
+    if (canMine) {
+      for (let i = 0; i < n; i++) await provider.send("evm_mine", []);
+      return;
+    }
+    const start = await provider.getBlockNumber();
+    while ((await provider.getBlockNumber()) < start + n) await sleep(400);
+  }
+
+  if (RUN_SMOKE) {
+    console.log("\nSmoke test (full LONG lifecycle)...");
+    const S0 = 100n * E18;
+    const S1 = 150n * E18;
+    const D = 100n * E18;
+
+    await (await quoteC.mint(addr, 1_000_000n * E18)).wait();
+    await (await baseC.mint(addr, 100_000n * E18)).wait();
+    await (await quoteC.approve(vault.address, ethers.MaxUint256)).wait();
+    await (await baseC.approve(oracle.address, ethers.MaxUint256)).wait();
+    await (await quoteC.approve(oracle.address, ethers.MaxUint256)).wait();
+
+    async function publish(priceWad) {
+      const id = await oracleC.nextQuoteId();
+      const bn = await provider.getBlockNumber();
+      await (await oracleC.submitQuote(base.address, quote.address, E18, priceWad, bn + 10)).wait();
+      await advanceBlocks(11);
+      await (await oracleC.settleValidQuote(id)).wait();
+    }
+
+    await publish(S0);
+    await (await vaultC.deposit(1000n * E18)).wait();
+    await (await vaultC.openPosition(0, D, 10)).wait();
+    await publish(S1);
+
+    const payout = await vaultC.settlePosition.staticCall(0);
+    await (await vaultC.settlePosition(0)).wait();
+    assert.equal(payout, (1485n * E18) / 10n, "LONG payout at S1=1.5*S0 should be 148.5");
+
+    const eq = await vaultC.equity();
+    assert.equal(eq, (9515n * E18) / 10n, "LP equity after settle should be 951.5");
+
+    const shares = await vaultC.shares(addr);
+    const out = await vaultC.withdraw.staticCall(shares);
+    await (await vaultC.withdraw(shares)).wait();
+    assert.equal(out, (9515n * E18) / 10n, "LP withdrawal should be 951.5");
+
+    console.log(
+      `  payout=${ethers.formatEther(payout)}  equity=${ethers.formatEther(eq)}  withdraw=${ethers.formatEther(out)}`
+    );
+    console.log("  smoke test PASSED");
+  }
+
+  const info = {
+    network: net.chainId === 31337n ? "anvil-local" : `chain-${net.chainId}`,
+    chainId: Number(net.chainId),
+    deployer: addr,
+    oracle: oracle.address,
+    baseToken: base.address,
+    quoteToken: quote.address,
+    vault: vault.address,
+    feeBps: Number(FEE_BPS),
+    txHashes: { oracle: oracle.txHash, baseToken: base.txHash, quoteToken: quote.txHash, vault: vault.txHash },
+    timestamp: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(info, null, 2));
+  console.log("\nSaved deployment-vault.json");
+  console.log(`  ORACLE_ADDRESS=${oracle.address}`);
+  console.log(`  BASE_TOKEN=${base.address}`);
+  console.log(`  QUOTE_TOKEN=${quote.address}`);
+  console.log(`  VAULT_ADDRESS=${vault.address}`);
+}
+
+main().catch((e) => {
+  console.error("Deploy failed:", e.shortMessage || e.message);
+  process.exitCode = 1;
+});
