@@ -31,7 +31,9 @@ different flows (see `AGENTS.md`).
 
 The vault **reuses the V0.9 app stack** — the same tokens the faucet mints and the same oracle
 the V0.9 bot publishes to — so the frontend's "Claim test tokens" funds vault deposits and the
-vault marks to a live canonical price.
+vault marks to a live canonical price. The vault is **single-asset**: it only custodies the
+**quote** token (HKD); the **base** token (LLM) is used solely as the Monoracle pair key to derive
+the price. Every deposit, premium, payoff and equity figure is in the quote token.
 
 | Contract | Address |
 |---|---|
