@@ -4,7 +4,7 @@ import { http, type Hex } from "viem";
  * Mine blank blocks on the Anvil node to advance block.number.
  */
 export async function mineBlocks(count: number): Promise<void> {
-  const RPC = "http://localhost:8545";
+  const RPC = "http://127.0.0.1:8545";
   for (let i = 0; i < count; i++) {
     await fetch(RPC, {
       method: "POST",

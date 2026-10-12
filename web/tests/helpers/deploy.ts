@@ -86,7 +86,7 @@ const vaultABI = loadArtifact("IRMarketVault").abi;
 const submitQuoteFn = oracleABI.find((f: any) => f.name === "submitQuote") as any;
 
 export async function deployContracts(): Promise<DeployedContracts> {
-  const transport = http("http://localhost:8545");
+  const transport = http("http://127.0.0.1:8545");
 
   const publicClient = createPublicClient({
     chain: anvil,
@@ -194,7 +194,7 @@ export async function deployContracts(): Promise<DeployedContracts> {
 }
 
 export async function createMarket(deployed: DeployedContracts): Promise<string> {
-  const transport = http("http://localhost:8545");
+  const transport = http("http://127.0.0.1:8545");
   const publicClient = createPublicClient({ chain: anvil, transport });
   const walletClient = createWalletClient({
     chain: anvil,
@@ -247,7 +247,7 @@ export async function seedQuote(params: {
   quoteAmount: bigint;
   expiryBlocks: number;
 }): Promise<bigint> {
-  const transport = http("http://localhost:8545");
+  const transport = http("http://127.0.0.1:8545");
   const publicClient = createPublicClient({ chain: anvil, transport });
   const walletClient = createWalletClient({
     chain: anvil,

@@ -18,7 +18,7 @@ function makeBridgeScript(accountIndex: number): string {
   return `
 (function () {
   "use strict";
-  var RPC = "http://localhost:8545";
+  var RPC = "http://127.0.0.1:8545";
   var _id = 0;
   var CHAIN_ID = "0x7A69"; // 31337
   var ACCOUNTS = [

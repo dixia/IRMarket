@@ -1,7 +1,20 @@
 import { defineConfig } from "@playwright/test";
+import fs from "fs";
 import path from "path";
 
 const WEB_DIR = path.resolve(import.meta.dirname!);
+
+// Windows: system Edge (`channel: "msedge"`). WSL/Linux: prefer a system chromium when
+// present; otherwise let Playwright use its bundled browser (`npx playwright install
+// chromium`). A hardcoded executablePath would fail on machines without a system install.
+const SYSTEM_CHROMIUM = "/usr/bin/chromium";
+
+const launchOptions =
+  process.platform === "win32"
+    ? { channel: "msedge" as const }
+    : fs.existsSync(SYSTEM_CHROMIUM)
+      ? { executablePath: SYSTEM_CHROMIUM }
+      : {};
 
 export default defineConfig({
   testDir: path.join(WEB_DIR, "tests", "e2e"),
@@ -17,7 +30,7 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     headless: true,
     launchOptions: {
-      executablePath: "/usr/bin/chromium",
+      ...launchOptions,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     },
   },

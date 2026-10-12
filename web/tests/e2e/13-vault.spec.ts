@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { ethereumBridgeScript } from "../helpers/ethereum-bridge";
 
+// The vault page renders "Connect wallet" labels on the LP panel's action buttons when
+// disconnected, so scope wallet-connection clicks to the AppShell header button.
 test.describe.serial("13 - LP Vault", () => {
   test("13.1 - Vault page renders UI + canonical price", async ({ page }) => {
     await page.addInitScript(ethereumBridgeScript(0));
@@ -22,7 +24,7 @@ test.describe.serial("13 - LP Vault", () => {
     await page.addInitScript(ethereumBridgeScript(0));
     await page.goto("/vault");
 
-    await page.getByRole("button", { name: "Connect Wallet" }).click();
+    await page.locator("header").getByRole("button", { name: "Connect Wallet" }).click();
     await expect(page.getByText(/0xf39F.*2266/)).toBeVisible({ timeout: 10000 });
 
     await page.getByRole("button", { name: "Trade", exact: true }).click();
@@ -41,7 +43,7 @@ test.describe.serial("13 - LP Vault", () => {
     await page.addInitScript(ethereumBridgeScript(0));
     await page.goto("/vault");
 
-    await page.getByRole("button", { name: "Connect Wallet" }).click();
+    await page.locator("header").getByRole("button", { name: "Connect Wallet" }).click();
     await expect(page.getByText(/0xf39F.*2266/)).toBeVisible({ timeout: 10000 });
 
     await expect(page.getByRole("heading", { name: "Pool" })).toBeVisible({ timeout: 30000 });
