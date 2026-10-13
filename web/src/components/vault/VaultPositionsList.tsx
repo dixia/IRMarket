@@ -7,7 +7,7 @@ import { useVaultPositions } from "@/hooks/useVaultPositions";
 import { useVaultSettledPayouts } from "@/hooks/useVaultSettled";
 import { useVaultTrade } from "@/hooks/useVaultTrade";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { VaultSide, VaultStatus, vaultPayoutAt } from "@/lib/vault";
+import { VaultSide, VaultStatus, vaultPayoutAt, vaultPnlAt } from "@/lib/vault";
 import { formatAmount, formatCountdown, formatPnl, formatPrice } from "@/lib/format";
 import { TxStatusCard, mapTransactionError, type TxState } from "@/components/common/TxStatusCard";
 
@@ -28,6 +28,17 @@ export function VaultPositionsList({ account }: { account?: `0x${string}` }) {
 
   const [settleTarget, setSettleTarget] = useState<bigint | null>(null);
   const pending = trade.phase === "pending";
+
+  // Aggregate estimated PnL across OPEN positions at the current canonical price.
+  const openPnl = useMemo(() => {
+    if (!price.exists || price.price === undefined) return undefined;
+    let sum = 0n;
+    for (const p of positions) {
+      if (p.status === VaultStatus.SETTLED) continue;
+      sum += vaultPnlAt(p, price.price);
+    }
+    return sum;
+  }, [positions, price.exists, price.price]);
 
   const txState: TxState = useMemo(() => {
     if (trade.phase === "pending") {
@@ -64,6 +75,16 @@ export function VaultPositionsList({ account }: { account?: `0x${string}` }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-xl border border-card-border bg-card p-4">
+        <div className="text-sm text-text-dim">Open PnL (estimated at current price)</div>
+        <div
+          className={`text-lg font-bold ${
+            openPnl === undefined ? "text-text-dim" : openPnl >= 0n ? "text-bull" : "text-bear"
+          }`}
+        >
+          {openPnl !== undefined ? `${formatPnl(openPnl)} ${quoteMeta.symbol}` : "—"}
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         {positions.map((position) => {
           const settled = position.status === VaultStatus.SETTLED;
@@ -72,6 +93,10 @@ export function VaultPositionsList({ account }: { account?: `0x${string}` }) {
           const livePayout =
             !settled && price.exists && price.price !== undefined
               ? vaultPayoutAt(position, price.price)
+              : undefined;
+          const livePnl =
+            !settled && price.exists && price.price !== undefined
+              ? vaultPnlAt(position, price.price)
               : undefined;
           const settleResult = payouts.get(position.id.toString());
 
@@ -135,14 +160,21 @@ export function VaultPositionsList({ account }: { account?: `0x${string}` }) {
                     <Row label="Settled" value="—" />
                   )
                 ) : (
-                  <Row
-                    label="Estimated payout at current price"
-                    value={
-                      livePayout !== undefined
-                        ? `${formatAmount(livePayout, quoteMeta.decimals, 4)} ${quoteMeta.symbol}`
-                        : "—"
-                    }
-                  />
+                  <>
+                    <Row
+                      label="Estimated payout at current price"
+                      value={
+                        livePayout !== undefined
+                          ? `${formatAmount(livePayout, quoteMeta.decimals, 4)} ${quoteMeta.symbol}`
+                          : "—"
+                      }
+                    />
+                    <Row
+                      label="Estimated PnL"
+                      value={livePnl !== undefined ? `${formatPnl(livePnl)} ${quoteMeta.symbol}` : "—"}
+                      accent={livePnl === undefined ? undefined : livePnl >= 0n ? "bull" : "bear"}
+                    />
+                  </>
                 )}
               </div>
 

@@ -32,15 +32,15 @@ different flows (see `AGENTS.md`).
 The vault **reuses the V0.9 app stack** — the same tokens the faucet mints and the same oracle
 the V0.9 bot publishes to — so the frontend's "Claim test tokens" funds vault deposits and the
 vault marks to a live canonical price. The vault is **single-asset**: it only custodies
-`settlementToken` (the **quote** token, HKD); `priceBase` (the **base** token, LLM) is used solely
+`settlementToken` (the **quote** token, HKD); `priceBase` (the **base** token, NVDA) is used solely
 as the Monoracle pair key to derive the price. Every deposit, premium, payoff and equity figure is
 in `settlementToken`.
 
 | Contract | Address |
 |---|---|
-| `IRMarketVault` | `0xDf1BdE04532ED1Bd0DF3fc92A0f0853e904a8188` |
+| `IRMarketVault` | `0xE4B88dc23F7660957ce5bDFF100882384b2F52f7` |
 | Monoracle (V0.9 app oracle) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
-| `priceBase` token (LLM) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
+| `priceBase` token (NVDA) | `0xD092361E5Cb54Db4CE69a856086108B0862473b4` |
 | `settlementToken` (HKD) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |
 | Deployer / operator | `0xF5Cf3950CA8055408648Ce5c155B2b3967269fcE` |
 

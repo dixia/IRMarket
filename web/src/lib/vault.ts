@@ -65,6 +65,14 @@ export function vaultPayoutAt(
   return notional + pnl;
 }
 
+/** Trader PnL at a given settle price: payout − premium paid (`deposit`). */
+export function vaultPnlAt(
+  position: { side: VaultSideValue; notional: bigint; entryPrice: bigint; deposit: bigint },
+  settlePrice: bigint,
+): bigint {
+  return vaultPayoutAt(position, settlePrice) - position.deposit;
+}
+
 /** equity per share (WAD); undefined when totalShares == 0. */
 export function vaultSharePrice(equity: bigint, totalShares: bigint): bigint | undefined {
   if (totalShares === 0n) return undefined;

@@ -9,6 +9,7 @@ import {
   vaultMaxPayout,
   vaultNotional,
   vaultPayoutAt,
+  vaultPnlAt,
   vaultSharePrice,
   vaultSharesForDeposit,
   vaultUnits,
@@ -44,6 +45,17 @@ test("payout SHORT", () => {
   const base = { side: VaultSide.SHORT, notional: 99n * E18, entryPrice: 100n * E18 };
   assert.equal(vaultPayoutAt(base, 200n * E18), 0n);
   assert.equal(vaultPayoutAt(base, 50n * E18), 1485n * 10n ** 17n);
+});
+
+test("pnl (payout - premium, D=100e18)", () => {
+  const D = 100n * E18;
+  const long = { side: VaultSide.LONG, notional: 99n * E18, entryPrice: 100n * E18, deposit: D };
+  const short = { side: VaultSide.SHORT, notional: 99n * E18, entryPrice: 100n * E18, deposit: D };
+  assert.equal(vaultPnlAt(long, 150n * E18), 485n * 10n ** 17n);
+  assert.equal(vaultPnlAt(long, 100n * E18), -1n * E18);
+  assert.equal(vaultPnlAt(long, 200n * E18), 98n * E18);
+  assert.equal(vaultPnlAt(short, 50n * E18), 485n * 10n ** 17n);
+  assert.equal(vaultPnlAt(short, 200n * E18), -100n * E18);
 });
 
 test("share price / shares / amount", () => {
