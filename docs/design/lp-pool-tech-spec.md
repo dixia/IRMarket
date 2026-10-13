@@ -52,7 +52,9 @@ meta-pool that allocates across vaults (V2).
 
 ### 1.3 Non-goals
 
-The pool must **never** be the sole provider of the price it settles against (LP-06).
+The pool must **never** be the sole provider of the price it settles against (LP-06) —
+**except** for an asset with no crypto-native on-chain asset and no RWA-mapping token, where
+the LP is the only possible provider (§8.6.1).
 The pool must **never** take unbounded liability on a single position (LP-02).
 There is no admin, owner, upgrade hook, or kill switch over **user funds** — consistent
 with the ownerless convention in `docs/sc-tech-spec.md` §10. The one exception is the
@@ -543,7 +545,9 @@ Indexers must dedupe on `(quoteId, reason)`; the adapter may rate-limit emission
 entity that both provides quotes and runs the vault. `bannedProvider` is therefore the
 operator EOA, fixed at adapter creation and surfaced in the UI. The adapter is created
 before the vault (factory order), so it cannot ban the vault address itself; banning the
-operator covers the real conflict.
+operator covers the real conflict. **Exception (§8.6.1):** for an asset with no crypto-native
+on-chain token and no RWA-mapping token there is no independent provider, so the LP is the
+only permitted price provider and `bannedProvider` is left unset for that vault.
 
 **Integration status (LP-D1 — resolved from local artifacts):** `latestValidQuoteId(bytes32)`
 and `quotes(uint256)` are both public on the upstream Monoracle — see
@@ -667,6 +671,31 @@ For the target assets (AI compute, frontier labs, pre-listing equities, RWA) the
   bonded settlement price, utilization caps.
 - This must be disclosed to LPs and stated plainly in the grant. A pool that claimed to be
   delta-neutral on these assets would be lying.
+
+### 8.6.1 Who may provide the price — tokenless assets (the LP-06 exception)
+
+Price provision depends on whether the asset has an on-chain representation:
+
+| Asset kind | Independent provider possible? | Who provides the price |
+|---|---|---|
+| Crypto-native on-chain token | yes — anyone can quote the `(base, quote)` pair | independent providers; the LP/operator is **banned** (`bannedProvider`, LP-06) |
+| RWA-mapped token (tokenized stock / RWA) | yes — a token exists to quote | independent providers; the LP/operator is banned |
+| **No crypto-native token and no RWA mapping** | **no** — there is no ERC20 to quote and no external venue | **only the LP** (the vault's liquidity provider / operator) |
+
+For an asset with **no crypto-native on-chain asset and no RWA-mapping token**, there is no
+independent price source: no token pair exists for a third party to quote and no external
+venue exists (§8.6). Therefore **only the LP is allowed to provide the price** — the LP
+submits the Monoracle quotes for the pair — and this is the **single deliberate exception to
+LP-06** (the pool must not price its own book). `bannedProvider` is left unset for such a
+vault.
+
+Safety for these assets rests entirely on the bonded, veto-arbitraged mechanism, so all of
+it still applies: the `minQuoteNotional` bond floor (§8.4), freshness (§8.3), the circuit
+breaker (§8.8), and the operator veto bot (§8.5). Because the LP is simultaneously
+counterparty *and* price provider, the conflict is concentrated and must be disclosed: the
+only defence is that a wrong quote is a profitable veto for any watcher, and the LP's own
+exposure is bounded by the §7 risk caps. Where a crypto-native or RWA-mapped token *does*
+exist, LP-06 applies in full and the LP/operator must not be the quote provider.
 
 ### 8.7 V1.1: QuorumAdapter (median across providers)
 
@@ -1020,7 +1049,7 @@ where the money is.
 | LP-03 | `maxProfitBps = 10 000` default → `payout ∈ [0, 2N]` |
 | LP-04 | Conservative equity (`balance − pendingPayout`), not mark-to-market |
 | LP-05 | Two-step withdrawal, no request-time snapshot |
-| LP-06 | Vault must not settle against its own quote |
+| LP-06 | Vault must not settle against its own quote — **except** an asset with no crypto-native on-chain token and no RWA-mapping token, where **only the LP** may provide the price (§8.6.1) |
 | LP-07 | Early close supported, with `closeFeeBps` |
 | LP-08 | Net skew is the binding risk control (unhedgeable exposure) |
 | LP-09 | Utilization cap guarantees withdrawal availability |
@@ -1033,3 +1062,4 @@ where the money is.
 | LP-16 | Breaker state + price params live in the adapter; the vault reads, never mirrors (§8.3) |
 | LP-17 | Only a state-changing validated read (`readAndUpdate`) may advance the breaker baseline (§8.3, §8.8) |
 | LP-18 | Deposit-side dilution disclosed (§6.5); a mitigation (marked equity / epoch accounting / deposit delay) must be chosen before V1 (LP-D14) |
+| LP-19 | Price provision: independent providers where a crypto-native/RWA-mapped token exists (LP/operator banned, LP-06); **only the LP** where the asset has no crypto-native token and no RWA mapping (§8.6.1) |
