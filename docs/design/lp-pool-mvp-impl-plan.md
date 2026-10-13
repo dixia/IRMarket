@@ -28,7 +28,7 @@ settle the position for the payoff in spec §4.2.
 
 | Area | What ships |
 |---|---|
-| Vault | ONE vault, constructor-configured `(oracle, baseToken, quoteToken, feeBps)`. No factory. |
+| Vault | ONE vault, constructor-configured `(oracle, priceBase, settlementToken, feeBps)`. No factory. |
 | LP capital | `deposit(amount) -> shares`, `withdraw(shares) -> amount`, internal share accounting, conservative equity `balance − pendingPayout` (spec §6.2). |
 | Product | Capped linear LONG/SHORT, payoff spec §4.2, `maxProfitBps = 10_000` → `payout ∈ [0, 2N]`. |
 | Settlement | `settlePosition(id)` after `expiryBlock`, reads `IMonoracle.getLatestPrice`, pays the owner, releases `pendingPayout`. |
@@ -66,7 +66,7 @@ contract IRMarketVault is ReentrancyGuard {
         uint64  expiryBlock; Status status;
     }
 
-    // immutables: oracle, baseToken, quoteToken, feeBps
+    // immutables: oracle, priceBase, settlementToken, feeBps
     // constants : MAX_FEE_BPS = 10_000, MAX_PROFIT_BPS = 10_000
     // state     : balance, pendingPayout, totalShares, shares[address], _positions[]
 

@@ -12,14 +12,14 @@ export const VAULT_ABI = [
   },
   {
     type: "function",
-    name: "baseToken",
+    name: "priceBase",
     inputs: [],
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",
   },
   {
     type: "function",
-    name: "quoteToken",
+    name: "settlementToken",
     inputs: [],
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",

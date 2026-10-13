@@ -69,7 +69,7 @@ Monoracle's canonical price* — in a few hours, and is what the implementation 
 
 | Area | MVP | Deferred to V1 |
 |---|---|---|
-| Vault topology | one vault, constructor-configured (oracle, pair `base`/`quote`, `feeBps`); **single-asset** — only the `quote` token is custodied | factory + permissionless vault creation (§3) |
+| Vault topology | one vault, constructor-configured (`oracle`, `priceBase`, `settlementToken`, `feeBps`); **single-asset** — only `settlementToken` is custodied | factory + permissionless vault creation (§3) |
 | LP capital | `deposit` / `withdraw` immediately; internal share accounting; conservative `equity = balance − pendingPayout` (§6.2, §6.3) | ERC20 share token, two-step withdrawal queue (§6.4) |
 | Product | capped linear LONG/SHORT, payoff §4.2, `maxProfitBps = 10_000` → `payout ∈ [0, 2N]` | early close / `closeFeeBps` (§9.2) |
 | Size limits | **none** — any deposit/tenor accepted; the only bounds are the `Insolvent` check and token balances | `minDeposit` / `maxDeposit` / `maxTenorBlocks` (§7) |
@@ -78,10 +78,11 @@ Monoracle's canonical price* — in a few hours, and is what the implementation 
 | Price safety | **none** — reads the raw canonical price | PriceAdapter: bond floor, freshness, banned provider, circuit breaker (§8) |
 | Params / ops | constructor constants | risk-param timelock, factory, veto bot, keeper, UI (§7, §8.5, §15) |
 
-**The pool is single-asset.** The vault holds exactly one token: the settlement asset `Q` (e.g.
-USDC, or the test HKD token). Every deposit, premium, payoff and equity figure is denominated in
-`Q`; only `Q` is ever transferred. The base token `B` is **never held or moved** by the vault — it
-appears only as one half of the Monoracle pair key `(B, Q)` used to read the price `P`. The oracle
+**The pool is single-asset.** The vault holds exactly one token: the settlement asset `Q`, called
+`settlementToken` (e.g. USDC, or the test HKD token). Every deposit, premium, payoff and equity
+figure is denominated in `Q`; only `Q` is ever transferred. The price-pair base `B`, called
+`priceBase`, is **never held or moved** by the vault — it appears only as one half of the Monoracle
+pair key `(B, Q)` (i.e. `(priceBase, settlementToken)`) used to read the price `P`. The oracle
 needs two assets purely to *express a price* (a ratio); that does not make the pool multi-asset.
 PnL is settled in the single unit `Q`. See §4.1.
 
@@ -206,10 +207,11 @@ cost is fragmented liquidity, accepted for V1; a meta-pool allocator is a V2 con
 All arithmetic is in native units; the WAD price is never mixed with token decimals
 (see §13.1 for the decimals trap).
 
-**Single-asset pool.** Only `Q` is ever held or moved; `B` is a price-pair reference, not a pool
-asset. The oracle's `(B, Q)` pair is how a price is *expressed* (a ratio), not an indication that
-the vault is multi-asset — the vault has no balance of `B` and never transfers it. The payoff is
-computed from `P` but paid entirely in `Q`.
+**Single-asset pool.** Only `Q` (`settlementToken`) is ever held or moved; `B` (`priceBase`) is a
+price-pair reference, not a pool asset. The oracle's `(B, Q)` pair — `(priceBase, settlementToken)`
+on the vault — is how a price is *expressed* (a ratio), not an indication that the vault is
+multi-asset: the vault has no balance of `B` and never transfers it. The payoff is computed from
+`P` but paid entirely in `Q`.
 
 ### 4.2 Payoff (LP-02, LP-03)
 
@@ -503,7 +505,7 @@ function readAndUpdate() external returns (uint256 price, uint64 observedAt, boo
 
 function _read() internal view returns (uint256 qid, uint256 price, uint64 observedAt, bool valid, RejectReason reason) {
     if (block.number < pausedUntil) return (0, 0, 0, false, RejectReason.PAUSED);
-    bytes32 key = keccak256(abi.encodePacked(baseToken, quoteToken));
+    bytes32 key = keccak256(abi.encodePacked(priceBase, settlementToken));
     qid = IMonoracle(oracle).latestValidQuoteId(key);         // public mapping
     if (qid == 0) return (0, 0, 0, false, RejectReason.NO_QUOTE);
 
@@ -525,11 +527,11 @@ function _read() internal view returns (uint256 qid, uint256 price, uint64 obser
 | `provider ≠ bannedProvider` | LP-06 | the vault's operator must not price its own book — see below |
 | circuit breaker on `\|Δ\| > maxJumpBps` | LP-12 | pause on implausible jumps; the tripped quote is never re-accepted (§8.8) |
 
-**Adapter state and parameters** (immutable unless noted): `oracle`, `baseToken`,
-`quoteToken`, `minQuoteNotional`, `maxPriceAgeBlocks`, `maxJumpBps`,
+**Adapter state and parameters** (immutable unless noted): `oracle`, `priceBase`,
+`settlementToken`, `minQuoteNotional`, `maxPriceAgeBlocks`, `maxJumpBps`,
 `circuitBreakerCooldownBlocks`, `bannedProvider`. Mutable: `lastAcceptedPrice`,
 `pausedUntil`, `trippedQuoteId`, and `vault` (set once via `bindVault`). The factory
-validates `adapter.baseToken()/quoteToken()` against the vault's pair and calls `bindVault`
+validates `adapter.priceBase()/settlementToken()` against the vault's pair and calls `bindVault`
 exactly once — an adapter serves exactly one vault, and a vault one adapter.
 
 **Event spam:** `readAndUpdate()` is permissionless, so anyone can emit `PriceRejected`.
@@ -546,7 +548,7 @@ operator covers the real conflict.
 **Integration status (LP-D1 — resolved from local artifacts):** `latestValidQuoteId(bytes32)`
 and `quotes(uint256)` are both public on the upstream Monoracle — see
 `abi/Monoracle.abi.json` (view, `bytes32 → uint256`; full `Quote` tuple). The pair key is
-`keccak256(abi.encodePacked(baseToken, quoteToken))`, confirmed by
+`keccak256(abi.encodePacked(priceBase, settlementToken))`, confirmed by
 `test/MonoracleMock.test.js` and `contracts/test/MonoracleMock.sol`. The earlier note about
 `contracts/Monoracle.sol` is obsolete: the fork was deleted in CWV-01 (`todo.md`); the
 adapter is pinned to the **upstream ABI only**. Remaining P0 work is operational, not
@@ -764,10 +766,10 @@ not sit open indefinitely.
 ```solidity
 // --- PoolFactory -------------------------------------------------------------
 function createVault(
-    address baseToken,
-    address quoteToken,
+    address priceBase,
+    address settlementToken,
     address priceAdapter,       // Monoracle-backed, per market; factory asserts
-                                // adapter.baseToken()==baseToken, adapter.quoteToken()==quoteToken,
+                                // adapter.priceBase()==priceBase, adapter.settlementToken()==settlementToken,
                                 // adapter.vault()==0, then calls adapter.bindVault(vault) once
     RiskParams calldata params
 ) external returns (address vault);
@@ -824,7 +826,7 @@ struct RiskParams {
 ```
 
 **MVP surface (implemented, §1.4).** The MVP is a strict subset — `IRMarketVault` with the
-constructor `(oracle, baseToken, quoteToken, feeBps)`, `deposit`/`withdraw`,
+constructor `(oracle, priceBase, settlementToken, feeBps)`, `deposit`/`withdraw`,
 `openPosition(Side, uint256, uint64)`, `settlePosition(uint256)`, `equity()`,
 `pendingPayout()`, `positions(uint256)`, `positionCount()`. No adapter/factory/queue/params.
 See `contracts/IRMarketVault.sol`.

@@ -150,12 +150,17 @@ async function main() {
     chainId: Number(net.chainId),
     deployer: addr,
     oracle: oracle.address,
-    baseToken: base.address,
-    quoteToken: quote.address,
+    priceBase: base.address,
+    settlementToken: quote.address,
     vault: vault.address,
     feeBps: Number(FEE_BPS),
     reusedExistingStack: REUSE,
-    txHashes: { oracle: oracle.txHash, baseToken: base.txHash, quoteToken: quote.txHash, vault: vault.txHash },
+    txHashes: {
+      oracle: oracle.txHash,
+      priceBase: base.txHash,
+      settlementToken: quote.txHash,
+      vault: vault.txHash,
+    },
     timestamp: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(info, null, 2));

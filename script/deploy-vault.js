@@ -35,8 +35,8 @@ async function main() {
   const vault = await Vault.deploy(oracle.target, base.target, quote.target, feeBps);
 
   console.log(`MonoracleMock : ${oracle.target}`);
-  console.log(`BaseToken LLM : ${base.target}`);
-  console.log(`QuoteToken HKD: ${quote.target}`);
+  console.log(`PriceBase LLM : ${base.target}`);
+  console.log(`Settlement HKD: ${quote.target}`);
   console.log(`IRMarketVault : ${vault.target} (feeBps=${feeBps})`);
 
   // Fund demo accounts and wire approvals.

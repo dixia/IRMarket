@@ -7,10 +7,16 @@ import {IMonoracle} from "./IMonoracle.sol";
 
 /**
  * @title IRMarketVault (MVP)
- * @notice Minimal LP pool over Monoracle. LPs deposit the quote token for pro-rata
- *         shares; traders pay a premium to open a capped-linear LONG/SHORT; positions
- *         settle against Monoracle's canonical price (`getLatestPrice`).
- * @dev    Simplified cut of `docs/design/lp-pool-tech-spec.md`: no adapter, no factory,
+ * @notice Minimal **single-asset** LP pool over Monoracle. LPs deposit the one asset the
+ *         vault custodies — `settlementToken` — for pro-rata shares; traders pay a premium
+ *         (also in `settlementToken`) to open a capped-linear LONG/SHORT; positions settle
+ *         against Monoracle's canonical price (`getLatestPrice`).
+ * @dev    `settlementToken` is the only asset held or moved: every deposit, premium, payoff
+ *         and equity figure is denominated in it, and PnL settles in that single unit.
+ *         `priceBase` is never held or transferred — it appears only as one half of the
+ *         oracle pair `(priceBase, settlementToken)` used to read the price.
+ *
+ *         Simplified cut of `docs/design/lp-pool-tech-spec.md`: no adapter, no factory,
  *         no admission caps, no circuit breaker, no withdrawal queue. Equity is
  *         conservative (`balance - pendingPayout`) and every open enforces
  *         `pendingPayout <= balance`, so the pool can never be involuntarily insolvent.
@@ -18,8 +24,8 @@ import {IMonoracle} from "./IMonoracle.sol";
  *         demo of the payoff/settlement accounting only.
  *
  *         Accepted MVP limitations (impl-plan §6): settlement marks at call-time price
- *         (American option), a pathological overflow strands a position, and quote tokens
- *         sent directly to the vault are not counted and cannot be swept.
+ *         (American option), a pathological overflow strands a position, and settlement
+ *         tokens sent directly to the vault are not counted and cannot be swept.
  */
 contract IRMarketVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -37,7 +43,7 @@ contract IRMarketVault is ReentrancyGuard {
     struct Position {
         address owner;
         Side side;
-        uint256 deposit;      // gross premium paid, quote-native
+        uint256 deposit;      // gross premium paid, settlement-native
         uint256 fee;          // deposit - notional
         uint256 notional;     // at-risk capital
         uint256 entryPrice;   // WAD 1e18
@@ -50,12 +56,12 @@ contract IRMarketVault is ReentrancyGuard {
     uint256 public constant MAX_PROFIT_BPS = 10_000; // payout in [0, 2N]
 
     IMonoracle public immutable oracle;
-    address public immutable baseToken;
-    address public immutable quoteToken;
+    address public immutable priceBase;
+    address public immutable settlementToken;
     uint256 public immutable feeBps;
 
-    uint256 public balance;        // cached quote balance; direct token donations are NOT
-                                   // counted and cannot be swept (see header @dev)
+    uint256 public balance;        // cached settlementToken balance; direct token donations
+                                   // are NOT counted and cannot be swept (see header @dev)
     uint256 public pendingPayout;  // worst-case obligation over OPEN positions
     uint256 public totalShares;    // LP shares outstanding
 
@@ -85,14 +91,14 @@ contract IRMarketVault is ReentrancyGuard {
     );
     event PositionSettled(uint256 indexed positionId, uint256 settlePrice, uint256 payout);
 
-    constructor(address oracle_, address baseToken_, address quoteToken_, uint256 feeBps_) {
-        if (oracle_ == address(0) || baseToken_ == address(0) || quoteToken_ == address(0)) {
+    constructor(address oracle_, address priceBase_, address settlementToken_, uint256 feeBps_) {
+        if (oracle_ == address(0) || priceBase_ == address(0) || settlementToken_ == address(0)) {
             revert InvalidConfig();
         }
         if (feeBps_ >= MAX_FEE_BPS) revert InvalidConfig();
         oracle = IMonoracle(oracle_);
-        baseToken = baseToken_;
-        quoteToken = quoteToken_;
+        priceBase = priceBase_;
+        settlementToken = settlementToken_;
         feeBps = feeBps_;
     }
 
@@ -125,7 +131,7 @@ contract IRMarketVault is ReentrancyGuard {
         if (supply > 0 && eq == 0) revert DepositAtZeroEquity();
         sharesMinted = supply == 0 ? amount : (amount * supply) / eq;
 
-        IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(settlementToken).safeTransferFrom(msg.sender, address(this), amount);
         balance += amount;
         totalShares = supply + sharesMinted;
         shares[msg.sender] += sharesMinted;
@@ -143,7 +149,7 @@ contract IRMarketVault is ReentrancyGuard {
         totalShares = supply - shareAmount;
         balance -= amount;
 
-        IERC20(quoteToken).safeTransfer(msg.sender, amount);
+        IERC20(settlementToken).safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, shareAmount, amount);
     }
 
@@ -159,14 +165,14 @@ contract IRMarketVault is ReentrancyGuard {
         if (depositAmount == 0) revert ZeroAmount();
         if (tenorBlocks == 0) revert ZeroTenor();
 
-        (uint256 entryPrice, , bool exists) = oracle.getLatestPrice(baseToken, quoteToken);
+        (uint256 entryPrice, , bool exists) = oracle.getLatestPrice(priceBase, settlementToken);
         if (!exists || entryPrice == 0) revert PriceUnavailable();
 
         uint256 fee = (depositAmount * feeBps) / MAX_FEE_BPS;
         uint256 notional = depositAmount - fee;
         uint256 maxPayout = (notional * (MAX_FEE_BPS + MAX_PROFIT_BPS)) / MAX_FEE_BPS;
 
-        IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), depositAmount);
+        IERC20(settlementToken).safeTransferFrom(msg.sender, address(this), depositAmount);
         balance += depositAmount;
 
         uint256 newPending = pendingPayout + maxPayout;
@@ -202,7 +208,7 @@ contract IRMarketVault is ReentrancyGuard {
         if (p.status != Status.OPEN) revert NotOpen();
         if (block.number < p.expiryBlock) revert NotExpired();
 
-        (uint256 settlePrice, , bool exists) = oracle.getLatestPrice(baseToken, quoteToken);
+        (uint256 settlePrice, , bool exists) = oracle.getLatestPrice(priceBase, settlementToken);
         if (!exists || settlePrice == 0) revert PriceUnavailable();
 
         payout = _payout(p, settlePrice);
@@ -211,7 +217,7 @@ contract IRMarketVault is ReentrancyGuard {
         pendingPayout -= p.maxPayout;
         balance -= payout;
 
-        IERC20(quoteToken).safeTransfer(p.owner, payout);
+        IERC20(settlementToken).safeTransfer(p.owner, payout);
         emit PositionSettled(positionId, settlePrice, payout);
     }
 

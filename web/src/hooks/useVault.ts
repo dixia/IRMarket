@@ -10,8 +10,8 @@ import { useCurrentBlock } from "./useCurrentBlock";
 
 export interface VaultMeta {
   oracle?: `0x${string}`;
-  baseToken?: `0x${string}`;
-  quoteToken?: `0x${string}`;
+  priceBase?: `0x${string}`;
+  settlementToken?: `0x${string}`;
   feeBps?: bigint;
   isLoading: boolean;
 }
@@ -27,13 +27,13 @@ export function useVaultMeta(): VaultMeta {
       // NB: use plain reads, not publicClient.multicall — the wagmi chain config sets
       // `contracts: {}` (web/src/lib/wagmi.ts), so viem multicall throws
       // "multicallAddress is required" in the browser.
-      const [oracle, baseToken, quoteToken, feeBps] = await Promise.all([
+      const [oracle, priceBase, settlementToken, feeBps] = await Promise.all([
         publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "oracle" }),
-        publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "baseToken" }),
-        publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "quoteToken" }),
+        publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "priceBase" }),
+        publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "settlementToken" }),
         publicClient.readContract({ address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: "feeBps" }),
       ]);
-      return { oracle, baseToken, quoteToken, feeBps };
+      return { oracle, priceBase, settlementToken, feeBps };
     },
     enabled: hasVault && !!VAULT_ADDRESS && !!publicClient,
     staleTime: Infinity,
@@ -41,8 +41,8 @@ export function useVaultMeta(): VaultMeta {
 
   return {
     oracle: query.data?.oracle,
-    baseToken: query.data?.baseToken,
-    quoteToken: query.data?.quoteToken,
+    priceBase: query.data?.priceBase,
+    settlementToken: query.data?.settlementToken,
     feeBps: query.data?.feeBps,
     isLoading: query.isLoading,
   };
@@ -115,17 +115,17 @@ export function useVaultPrice(): VaultPriceState {
   const blockNumber = useCurrentBlock();
 
   const enabled =
-    hasVault && !!publicClient && !!meta.oracle && !!meta.baseToken && !!meta.quoteToken;
+    hasVault && !!publicClient && !!meta.oracle && !!meta.priceBase && !!meta.settlementToken;
 
   const query = useQuery({
     queryKey: ["vaultPrice", VAULT_ADDRESS_RAW],
     queryFn: async () => {
-      if (!publicClient || !meta.oracle || !meta.baseToken || !meta.quoteToken) return undefined;
+      if (!publicClient || !meta.oracle || !meta.priceBase || !meta.settlementToken) return undefined;
       const result = await publicClient.readContract({
         address: meta.oracle,
         abi: MONORACLE_ABI,
         functionName: "getLatestPrice",
-        args: [meta.baseToken, meta.quoteToken],
+        args: [meta.priceBase, meta.settlementToken],
       });
       return result as readonly [bigint, number, boolean];
     },

@@ -8,12 +8,12 @@ import { formatPrice } from "@/lib/format";
 export function PriceHeader() {
   const meta = useVaultMeta();
   const price = useVaultPrice();
-  const metaMap = useTokenMeta([meta.baseToken ?? "0x", meta.quoteToken ?? "0x"]);
-  const baseMeta = meta.baseToken
-    ? (metaMap.get(meta.baseToken.toLowerCase()) ?? { symbol: "BASE", decimals: 18 })
+  const metaMap = useTokenMeta([meta.priceBase ?? "0x", meta.settlementToken ?? "0x"]);
+  const baseMeta = meta.priceBase
+    ? (metaMap.get(meta.priceBase.toLowerCase()) ?? { symbol: "BASE", decimals: 18 })
     : { symbol: "BASE", decimals: 18 };
-  const quoteMeta = meta.quoteToken
-    ? (metaMap.get(meta.quoteToken.toLowerCase()) ?? { symbol: "QUOTE", decimals: 18 })
+  const quoteMeta = meta.settlementToken
+    ? (metaMap.get(meta.settlementToken.toLowerCase()) ?? { symbol: "QUOTE", decimals: 18 })
     : { symbol: "QUOTE", decimals: 18 };
 
   return (

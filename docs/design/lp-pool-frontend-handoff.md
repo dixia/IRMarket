@@ -31,16 +31,17 @@ different flows (see `AGENTS.md`).
 
 The vault **reuses the V0.9 app stack** — the same tokens the faucet mints and the same oracle
 the V0.9 bot publishes to — so the frontend's "Claim test tokens" funds vault deposits and the
-vault marks to a live canonical price. The vault is **single-asset**: it only custodies the
-**quote** token (HKD); the **base** token (LLM) is used solely as the Monoracle pair key to derive
-the price. Every deposit, premium, payoff and equity figure is in the quote token.
+vault marks to a live canonical price. The vault is **single-asset**: it only custodies
+`settlementToken` (the **quote** token, HKD); `priceBase` (the **base** token, LLM) is used solely
+as the Monoracle pair key to derive the price. Every deposit, premium, payoff and equity figure is
+in `settlementToken`.
 
 | Contract | Address |
 |---|---|
 | `IRMarketVault` | `0x8995b6524f7809d9472dff0dDD06512DA5BCe380` |
 | Monoracle (V0.9 app oracle) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
-| Base token (LLM) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
-| Quote token (HKD) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |
+| `priceBase` token (LLM) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
+| `settlementToken` (HKD) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |
 | Deployer / operator | `0xF5Cf3950CA8055408648Ce5c155B2b3967269fcE` |
 
 - These are also written to `deployment-vault.json` (repo root, gitignored) by
@@ -65,8 +66,8 @@ Source: `contracts/IRMarketVault.sol`. Full ABI artifact:
 
 ### Constructor (immutables)
 ```solidity
-constructor(address oracle, address baseToken, address quoteToken, uint256 feeBps)
-// public getters: oracle, baseToken, quoteToken, feeBps
+constructor(address oracle, address priceBase, address settlementToken, uint256 feeBps)
+// public getters: oracle, priceBase, settlementToken, feeBps
 // constants: MAX_FEE_BPS = 10_000, MAX_PROFIT_BPS = 10_000
 ```
 
@@ -78,7 +79,7 @@ enum Status { OPEN, SETTLED }            // 0 = OPEN, 1 = SETTLED
 struct Position {
     address owner;
     Side    side;          // uint8
-    uint256 deposit;       // gross premium paid (quote-native)
+    uint256 deposit;       // gross premium paid (settlement-native)
     uint256 fee;           // deposit - notional
     uint256 notional;      // N, at-risk capital
     uint256 entryPrice;    // WAD 1e18
@@ -124,7 +125,7 @@ event PositionSettled(uint256 indexed positionId, uint256 settlePrice, uint256 p
 `DepositAtZeroEquity`, `InsufficientShares`, `NotOpen`, `NotExpired`.
 
 ### Oracle read used
-`IMonoracle.getLatestPrice(baseToken, quoteToken) → (uint256 price /*WAD*/, uint32 settledSlot, bool exists)`.
+`IMonoracle.getLatestPrice(priceBase, settlementToken) → (uint256 price /*WAD*/, uint32 settledSlot, bool exists)`.
 The vault treats `price == 0` as unavailable (`PriceUnavailable`).
 
 ---

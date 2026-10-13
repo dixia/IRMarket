@@ -16,14 +16,14 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
   const meta = useVaultMeta();
   const stats = useVaultStats(account);
   const trade = useVaultTrade();
-  const { allowance } = useVaultAllowance(account, meta.quoteToken);
+  const { allowance } = useVaultAllowance(account, meta.settlementToken);
   const balances = useBalances(
     account,
-    meta.baseToken && meta.quoteToken ? { base: meta.baseToken, quote: meta.quoteToken } : null,
+    meta.priceBase && meta.settlementToken ? { base: meta.priceBase, quote: meta.settlementToken } : null,
   );
-  const metaMap = useTokenMeta([meta.baseToken ?? "0x", meta.quoteToken ?? "0x"]);
-  const quoteMeta = meta.quoteToken
-    ? (metaMap.get(meta.quoteToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
+  const metaMap = useTokenMeta([meta.priceBase ?? "0x", meta.settlementToken ?? "0x"]);
+  const quoteMeta = meta.settlementToken
+    ? (metaMap.get(meta.settlementToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
     : { symbol: "HKD", decimals: 18 };
   const decimals = quoteMeta.decimals;
 
@@ -82,7 +82,7 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
     return { status: "idle" };
   }, [trade.phase, trade.hash, trade.error, lastAction]);
 
-  const canDeposit = !!account && depositAmount !== undefined && depositAmount > 0n && !pending && !!meta.quoteToken;
+  const canDeposit = !!account && depositAmount !== undefined && depositAmount > 0n && !pending && !!meta.settlementToken;
   const canWithdraw =
     !!account && withdrawShares !== undefined && withdrawShares > 0n && !pending && (stats.shares ?? 0n) > 0n;
 
@@ -95,10 +95,10 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
         : "Deposit";
 
   const onDeposit = () => {
-    if (!meta.quoteToken || depositAmount === undefined) return;
+    if (!meta.settlementToken || depositAmount === undefined) return;
     if (needApproval) {
       setLastAction("approve");
-      trade.approveQuote(meta.quoteToken);
+      trade.approveQuote(meta.settlementToken);
     } else {
       setLastAction("deposit");
       trade.deposit(depositAmount);

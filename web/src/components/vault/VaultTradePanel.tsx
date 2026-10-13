@@ -28,17 +28,17 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
   const meta = useVaultMeta();
   const price = useVaultPrice();
   const trade = useVaultTrade();
-  const { allowance } = useVaultAllowance(account, meta.quoteToken);
+  const { allowance } = useVaultAllowance(account, meta.settlementToken);
   const balances = useBalances(
     account,
-    meta.baseToken && meta.quoteToken ? { base: meta.baseToken, quote: meta.quoteToken } : null,
+    meta.priceBase && meta.settlementToken ? { base: meta.priceBase, quote: meta.settlementToken } : null,
   );
-  const metaMap = useTokenMeta([meta.baseToken ?? "0x", meta.quoteToken ?? "0x"]);
-  const baseMeta = meta.baseToken
-    ? (metaMap.get(meta.baseToken.toLowerCase()) ?? { symbol: "BASE", decimals: 18 })
+  const metaMap = useTokenMeta([meta.priceBase ?? "0x", meta.settlementToken ?? "0x"]);
+  const baseMeta = meta.priceBase
+    ? (metaMap.get(meta.priceBase.toLowerCase()) ?? { symbol: "BASE", decimals: 18 })
     : { symbol: "BASE", decimals: 18 };
-  const quoteMeta = meta.quoteToken
-    ? (metaMap.get(meta.quoteToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
+  const quoteMeta = meta.settlementToken
+    ? (metaMap.get(meta.settlementToken.toLowerCase()) ?? { symbol: "HKD", decimals: 18 })
     : { symbol: "HKD", decimals: 18 };
   const decimals = quoteMeta.decimals;
 
@@ -90,7 +90,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
 
   const validTenor = tenor !== undefined && tenor > 0n;
   const validAmount = D !== undefined && D > 0n;
-  const disabled = !account || !price.exists || !validAmount || !validTenor || pending || !meta.quoteToken;
+  const disabled = !account || !price.exists || !validAmount || !validTenor || pending || !meta.settlementToken;
 
   const buttonLabel = !account
     ? "Connect wallet"
@@ -107,10 +107,10 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
               : "Open SHORT";
 
   const onSubmit = () => {
-    if (!meta.quoteToken || D === undefined || tenor === undefined) return;
+    if (!meta.settlementToken || D === undefined || tenor === undefined) return;
     if (needApproval) {
       setLastAction("approve");
-      trade.approveQuote(meta.quoteToken);
+      trade.approveQuote(meta.settlementToken);
     } else {
       setLastAction("open");
       trade.openPosition(side, D, tenor);
