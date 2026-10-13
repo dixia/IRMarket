@@ -223,7 +223,7 @@ npm run test:e2e                              # E2E suite: test/IRMarketVault.e2
     locked and LP equity is reduced forever. Griefing cost is ~1:1 with the trader's own
     premium (they forfeit it too), so it is a bounded grief, not a solvency break; V1
     `maxDeposit`/`maxTenorBlocks` bound it. (M5 has the overflow test.)
-11. **Direct quote-token donations are stranded.** Tokens sent straight to the vault are not
+11. **Direct settlement-token donations are stranded.** Tokens sent straight to the vault are not
     counted in the cached `balance` and there is no sweep, so they are unrecoverable and
     break the `token.balanceOf == balance` lockstep the tests assert. NatSpec-noted in the
     contract.

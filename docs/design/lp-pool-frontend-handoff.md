@@ -14,7 +14,7 @@
 
 Add a **Vault** path next to the existing V0.9 veto-market UI:
 
-- **LP tab** — deposit quote token → shares; withdraw shares; show `equity`, `totalShares`,
+- **LP tab** — deposit the settlement token → shares; withdraw shares; show `equity`, `totalShares`,
   share price, `pendingPayout`.
 - **Trade tab** — pick side (LONG/SHORT), amount, tenor → preview fee/notional/max-payout →
   `openPosition`; then a **Positions** list with a **Settle** action after expiry.
@@ -182,7 +182,7 @@ withdraw:  amount = shares × equity / totalShares  // floor
 - Poll every ~5–15 s (see `useCurrentBlock` / react-query pattern).
 
 ### 4.2 LP tab
-- **Deposit:** amount input (quote token) → approve → `deposit(amount)`. After mining, read
+- **Deposit:** amount input (settlement token) → approve → `deposit(amount)`. After mining, read
   `shares(wallet)`, `totalShares`, `equity`.
 - **Stats:** `equity`, `totalShares`, `balance`, `pendingPayout`, and **share price =
   `equity / totalShares`** (show `—` when `totalShares == 0`). Format with `formatAmount`
@@ -193,11 +193,11 @@ withdraw:  amount = shares × equity / totalShares  // floor
   your share price will recover as positions settle. Depositing now buys at a discount."
 
 ### 4.3 Trade tab
-- Inputs: **side** (LONG/SHORT toggle), **amount** `D` (quote token), **tenor** (blocks —
+- Inputs: **side** (LONG/SHORT toggle), **amount** `D` (settlement token), **tenor** (blocks —
   offer presets like 3 min ≈ 600 blocks @300 ms; the MVP accepts **any** tenor).
 - **Preview** (compute client-side, mirror §3): `fee`, `N`, `maxPayout`, `units`. Show the
   entry price from §4.1. Show **max loss = premium** and **max profit = N** (payout capped at `2N`).
-- **Open:** approve quote token to the vault (if needed) → `openPosition(side, D, tenorBlocks)`.
+- **Open:** approve the settlement token to the vault (if needed) → `openPosition(side, D, tenorBlocks)`.
   Watch for `Insolvent` (pool can't cover `maxPayout`) — show "Pool capacity insufficient".
 - No liquidation / no margin — the trader's max loss is the premium.
 

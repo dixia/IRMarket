@@ -34,7 +34,7 @@
 
 | # | Item |
 |---|---|
-| 1 | Per-market **isolated vault** holding quote-token liquidity, with LP shares (ERC20) |
+| 1 | Per-market **isolated vault** holding settlement-token liquidity, with LP shares (ERC20) |
 | 2 | **Capped linear exotic option**: trader pays premium, pool is counterparty, payoff capped |
 | 3 | Open / early-close / expiry-settlement lifecycle |
 | 4 | **Price adapter** over Monoracle with minimum-bonded-notional, freshness, circuit breaker |
@@ -129,7 +129,7 @@ possible). It does not scale:
 ### 2.2 What the pool adds
 
 - **Fractional, user-chosen size** within `[minDeposit, maxDeposit]`.
-- **Pooled capital**: any LP can deposit quote-token liquidity and earn the spread.
+- **Pooled capital**: any LP can deposit settlement-token liquidity and earn the spread.
 - **Explicit, enforceable risk limits**: utilization, net skew, per-position cap — the things
   a grant reviewer will ask about when the underlying has no external hedge.
 - **Bounded, computable worst case**: at every block, the pool's maximum obligation is
@@ -196,7 +196,7 @@ cost is fragmented liquidity, accepted for V1; a meta-pool allocator is a V2 con
 
 | Symbol | Meaning |
 |---|---|
-| `Q` | quote token (settlement asset, e.g. HKD / USDC) — all amounts in **native units** |
+| `Q` | settlement token (`settlementToken`; the Monoracle quote asset, e.g. HKD / USDC) — all amounts in **native units** |
 | `P` | price, **WAD 1e18**, quote-native per base-native (`Monoracle.price`) |
 | `D` | deposit paid by trader, native `Q` |
 | `f` | `feeBps` — spread charged by the pool |
@@ -269,7 +269,7 @@ the dominant residual risk and is bounded, not eliminated, by §7.
 
 | Field | Rule |
 |---|---|
-| Base | `D` (deposit), in quote token |
+| Base | `D` (deposit), in settlement token |
 | `feeBps` | per-market risk parameter; V1 default 100 (1%), consistent with the V0.9 wrapper |
 | Accrual | **At open.** `fee` is retained by the pool immediately; only `N` is at risk. Note accounting equity still *drops* by `2N − D` at open (worst-case reservation, §6.5) and recovers at settlement — the fee is realised, the dip is not |
 | Close fee | `closeFeeBps` additionally on early close (LP-07); V1 default 50 (0.5%) |
@@ -951,7 +951,7 @@ Invariants (fuzz):
 - `Σ position.maxPayout == pendingPayout`.
 - `equity` never decreases from fees; never increases from an open; decreases by exactly
   `2N − D` at every open and nets to `fee − pnl` vs pre-open at settle (§6.5).
-- No quote token is ever transferred out except via payout, withdrawal, or fee routing.
+- No settlement token is ever transferred out except via payout, withdrawal, or fee routing.
 
 ---
 
