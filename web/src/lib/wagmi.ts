@@ -8,7 +8,12 @@ const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 10143);
 const chain = {
   ...monadTestnet,
   id: CHAIN_ID,
-  contracts: {},
+  // Multicall3 is deployed at the canonical address on Monad testnet. Without it,
+  // wagmi's `useReadContracts` (used by useMarkets) throws "multicallAddress is
+  // required" and the market list renders empty.
+  contracts: {
+    multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" as `0x${string}` },
+  },
   rpcUrls: {
     ...monadTestnet.rpcUrls,
     default: {

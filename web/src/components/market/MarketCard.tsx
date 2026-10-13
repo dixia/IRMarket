@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { BlockCountdown } from "./BlockCountdown";
 import { formatPrice } from "@/lib/format";
+import { assetName } from "@/lib/assets";
 import type { MarketWithMeta } from "@/lib/types";
 
 export function MarketCard({
@@ -15,6 +16,7 @@ export function MarketCard({
   const href = `/trade?m=${market.marketId.toString()}`;
 
   const quoteSymbol = market.ticker.split("/")[1] || market.ticker;
+  const baseSymbol = market.ticker.split("/")[0] || market.ticker;
 
   return (
     <div className="block rounded-xl border border-card-border bg-card p-4 transition-colors hover:border-primary/40">
@@ -26,7 +28,7 @@ export function MarketCard({
               {market.ticker}
             </span>
           </div>
-          <span className="text-[11px] text-text-dim">HK food stock</span>
+          <span className="text-[11px] text-text-dim">{assetName(baseSymbol)}</span>
         </div>
 
         <div className="mt-3 flex items-end justify-between">

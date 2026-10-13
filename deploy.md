@@ -31,6 +31,21 @@ node script/deploy.js
 
 Saves deployment info to `deployment.json` (gitignored).
 
+### 2b. Deploy multi-asset markets (optional)
+
+Deploys one `MockERC20` per requested asset, mints to the deployer, and creates
+an IRMarket market against a shared quote token. Writes `deployment-assets.json`
+(gitignored) for the bot. See `script/deploy-assets.js`.
+
+```bash
+# env: MARKET_ADDRESS, ORACLE_ADDRESS, QUOTE_TOKEN required
+ASSETS="NVDA:130,GLM:1,SNDK:50" node script/deploy-assets.js
+node script/deploy-assets.js --dry-run   # print plan, send no txs
+```
+
+`ASSETS` = comma list of `SYMBOL[:FAIRPRICE]` (fair price in quote units, 1e18).
+Optional: `ASSET_NAME_PREFIX`, `FEE_BPS` (default 100), `EXPIRY_SECONDS` (default 1800).
+
 ### 3. Configure environment
 
 Set the new addresses in `.env`, `bot/.env`, and `web/.env.local`.

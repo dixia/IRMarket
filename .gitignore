@@ -22,6 +22,7 @@ cache/compile-cache.json
 /node_modules
 deployment.json
 deployment-vault.json
+deployment-assets.json
 .next/
 bot/.env
 bot/.venv/
