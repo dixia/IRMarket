@@ -26,14 +26,16 @@ export function useMarkets(): MarketWithMeta[] {
     query: { enabled: configuredForWrapper },
   });
 
-  const marketCount = (data?.[0]?.result as bigint | undefined) ?? 0n;
+  // nextMarketId is the NEXT unused id, so valid markets are 1..nextMarketId-1.
+  // (Enumerating up to nextMarketId inclusive reads a non-existent market → ???/???.)
+  const nextMarketId = (data?.[0]?.result as bigint | undefined) ?? 0n;
 
   const marketIds = useMemo(() => {
-    if (!configuredForWrapper || marketCount === 0n) return [];
+    if (!configuredForWrapper || nextMarketId <= 1n) return [];
     const ids: bigint[] = [];
-    for (let i = 0n; i < marketCount; i++) ids.push(i + 1n);
+    for (let id = 1n; id < nextMarketId; id++) ids.push(id);
     return ids;
-  }, [configuredForWrapper, marketCount]);
+  }, [configuredForWrapper, nextMarketId]);
 
   const { data: marketsData } = useReadContracts({
     contracts: marketIds.map((marketId) => ({
