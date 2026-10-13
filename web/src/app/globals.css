@@ -1,29 +1,42 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #ffd400;
-  --color-primary-dim: #e6bf00;
-  --color-bull: #16c784;
-  --color-bear: #f6465d;
-  --color-bg-dark: #0e100f;
-  --color-card: #17181b;
-  --color-card-border: #26282d;
-  --color-text: #fbfaf9;
-  --color-text-dim: #9ca3af;
+  /* Neon Playground design tokens (source of truth: slidedeck/design/tokens.json) */
+  --color-primary: #6e54ff;
+  --color-primary-dim: #5b47e8;
+  --color-bull: #1d9bc4;
+  --color-bear: #d98a1f;
+  --color-bg-dark: #f5f3ff;
+  --color-card: #ffffff;
+  --color-card-border: #e3def5;
+  --color-text: #0e091c;
+  --color-text-dim: #6e6a85;
+  --color-ink-soft: #413a5c;
+  --color-l-purple: #efebfe;
+  --color-l-cyan: #e2f6fd;
+  --color-l-orange: #fff3e0;
 }
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   background-color: var(--color-bg-dark);
   color: var(--color-text);
 }
 
 code,
 .font-mono {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-roboto-mono), ui-monospace, monospace;
+}
+
+/* Kicker / eyebrow label: MONO, uppercase, letter-spaced (design-system typography rule). */
+.kicker {
+  font-family: var(--font-roboto-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .bg-dot {
-  background-image: radial-gradient(rgba(255, 212, 0, 0.06) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(110, 84, 255, 0.08) 1px, transparent 1px);
   background-size: 24px 24px;
 }

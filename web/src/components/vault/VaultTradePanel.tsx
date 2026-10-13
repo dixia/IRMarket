@@ -133,7 +133,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
           className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-            side === VaultSide.LONG ? "bg-bull text-white" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
+            side === VaultSide.LONG ? "bg-l-cyan text-bull" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
           }`}
           onClick={() => setSide(VaultSide.LONG)}
         >
@@ -141,7 +141,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
         </button>
         <button
           className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-            side === VaultSide.SHORT ? "bg-bear text-white" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
+            side === VaultSide.SHORT ? "bg-l-orange text-bear" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
           }`}
           onClick={() => setSide(VaultSide.SHORT)}
         >
@@ -149,7 +149,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
         </button>
       </div>
 
-      <label className="mt-3 block text-xs text-text-dim">Amount ({quoteMeta.symbol})</label>
+      <label className="kicker mt-3 block text-text-dim">Amount ({quoteMeta.symbol})</label>
       <input
         className="mt-1 w-full rounded-lg border border-card-border bg-bg-dark px-3 py-2 text-sm font-mono focus:border-primary outline-none"
         value={amountInput}
@@ -158,7 +158,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
         onChange={(e) => setAmountInput(e.target.value)}
       />
 
-      <label className="mt-3 block text-xs text-text-dim">Tenor (blocks)</label>
+      <label className="kicker mt-3 block text-text-dim">Tenor (blocks)</label>
       <div className="mt-1 flex gap-2">
         <input
           className="w-full rounded-lg border border-card-border bg-bg-dark px-3 py-2 text-sm font-mono focus:border-primary outline-none"
@@ -196,9 +196,7 @@ export function VaultTradePanel({ account }: { account?: `0x${string}` }) {
       </div>
 
       <button
-        className={`mt-3 w-full rounded-lg py-3 text-sm font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-          side === VaultSide.LONG ? "bg-bull hover:bg-bull/90" : "bg-bear hover:bg-bear/90"
-        }`}
+        className="mt-3 w-full rounded-lg bg-primary py-3 text-sm font-bold text-white transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled}
         onClick={onSubmit}
       >

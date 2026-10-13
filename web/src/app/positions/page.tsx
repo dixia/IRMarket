@@ -12,6 +12,7 @@ import { ClosePanel } from "@/components/position/ClosePanel";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { isFullyConfigured } from "@/lib/config";
+import { formatPnl } from "@/lib/format";
 import type { Position } from "@/lib/types";
 
 export default function PositionsPage() {
@@ -105,10 +106,9 @@ export default function PositionsPage() {
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <div className="text-xs text-text-dim">Open PnL</div>
+            <div className="kicker text-right text-text-dim">Open PnL</div>
             <div className={`text-lg font-bold ${totalPnl >= 0n ? "text-bull" : "text-bear"}`}>
-              {totalPnl >= 0n ? "+" : ""}
-              {(Number(totalPnl) / 10 ** 18).toFixed(2)} {quoteMeta.symbol}
+              {formatPnl(totalPnl)} {quoteMeta.symbol}
             </div>
           </div>
           <button
@@ -126,7 +126,7 @@ export default function PositionsPage() {
         </p>
       ) : positions.length === 0 ? (
         <div className="rounded-xl border border-card-border bg-card p-8 text-center">
-          <p className="text-sm text-text-dim">No positions yet. — Head to the market page and open a long or short to try it out.</p>
+          <p className="text-sm text-text-dim">No positions yet — open a long or short from the market page.</p>
         </div>
       ) : (
         <>
@@ -181,9 +181,8 @@ export default function PositionsPage() {
       )}
 
       <p className="text-xs text-text-dim">
-        Note: positions are derived live from on-chain events — nothing to claim (no central ledger).
-        Reverse-closing = buy the opposite side with the current bot quote, a direct veto with no fee;
-        closing a short requires topping up the difference to the open fee.
+        Positions are derived from on-chain events — nothing to claim. Reverse-closing buys the
+        opposite side at the current quote.
       </p>
     </div>
   );
@@ -201,7 +200,7 @@ function TabButton({
   return (
     <button
       className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-        active ? "bg-primary text-black" : "bg-card text-text-dim hover:text-text"
+        active ? "bg-primary text-white" : "bg-card text-text-dim hover:text-text"
       }`}
       onClick={onClick}
     >

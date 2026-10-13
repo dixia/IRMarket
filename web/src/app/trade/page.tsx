@@ -80,7 +80,7 @@ function TradeContent() {
             )}
           </div>
           <div className="text-right">
-            <div className="text-xs text-text-dim">Expiry</div>
+            <div className="kicker text-text-dim">Expiry</div>
             <BlockCountdown expiryBlock={market.expiryBlock} />
           </div>
         </div>
@@ -105,8 +105,7 @@ function TradeContent() {
 
       {price.status === "settling" && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-          Final price settling — the last quote hasn&apos;t been settled yet; the price shown is from the
-          previous round. Please wait.
+          Final price settling — the price shown is from the previous round.
         </p>
       )}
 
@@ -146,7 +145,7 @@ function Stat({
 }) {
   return (
     <div className="rounded-lg border border-card-border bg-card p-3">
-      <div className="text-xs text-text-dim">{label}</div>
+      <div className="kicker text-text-dim">{label}</div>
       <div className={`mt-0.5 text-sm font-semibold ${accent ? "text-primary" : ""}`}>{value}</div>
     </div>
   );

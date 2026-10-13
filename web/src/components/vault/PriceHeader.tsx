@@ -20,7 +20,7 @@ export function PriceHeader() {
     <div className="rounded-xl border border-card-border bg-card p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-xs text-text-dim">Canonical settlement price</div>
+          <div className="kicker text-text-dim">Canonical settlement price</div>
           {price.isLoading ? (
             <div className="mt-1 text-2xl font-bold text-text-dim">…</div>
           ) : price.exists ? (

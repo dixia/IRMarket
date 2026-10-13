@@ -52,7 +52,7 @@ export default function HomePage() {
 
         <div className="mt-6 flex flex-wrap items-center gap-3 text-sm">
           <button
-            className="rounded-lg bg-primary px-4 py-2 font-semibold text-black hover:bg-primary-dim transition-colors"
+            className="rounded-lg bg-primary px-4 py-2 font-semibold text-white hover:bg-primary-dim transition-colors"
             onClick={() => setFaucetOpen(true)}
           >
             Claim test tokens
@@ -97,8 +97,7 @@ export default function HomePage() {
 
       {(!isFullyConfigured && (
         <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-            Contract addresses not configured (missing NEXT_PUBLIC_ORACLE_ADDRESS / BASE_TOKEN / QUOTE_TOKEN).
-            Live quotes and trading will appear once configured.
+            Contract addresses not configured — live quotes and trading will appear once configured.
           </p>
       )) ||
         null}
