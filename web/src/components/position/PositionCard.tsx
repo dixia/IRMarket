@@ -112,8 +112,8 @@ export function PositionCard({
       </div>
       {expired && (
         <p className="mt-3 text-xs text-text-dim">
-          Final PnL is marked at the final price; the assets are already in your wallet —
-          reverse-close to cash out or hold. No settlement or claim needed.
+          Final PnL is marked at the final price, and the assets are already in your wallet —
+          reverse-close to cash out, or hold.
         </p>
       )}
     </div>

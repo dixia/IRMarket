@@ -149,11 +149,11 @@ export function ClosePanel({
             </div>
             <div className="flex justify-between gap-6">
               <span className="text-text-dim">Fee</span>
-              <span>0 (direct veto, bypasses wrapper)</span>
+              <span>0</span>
             </div>
             {shortfall > 0n && (
               <div className="flex justify-between gap-6 font-semibold text-bear">
-                <span>Top-up required (fee deducted at open)</span>
+                <span>Top-up required</span>
                 <span>{formatAmount(shortfall, quoteMeta.decimals, 4)} {quoteMeta.symbol}</span>
               </div>
             )}
@@ -165,9 +165,7 @@ export function ClosePanel({
           </div>
 
           <button
-            className={`mt-3 w-full rounded-lg py-3 text-sm font-bold transition-colors disabled:cursor-not-allowed ${
-              closeSide === "bull" ? "bg-bull text-white hover:bg-bull/90 disabled:bg-bull/40" : "bg-bear text-white hover:bg-bear/90 disabled:bg-bear/40"
-            }`}
+            className="mt-3 w-full rounded-lg bg-primary py-3 text-sm font-bold text-white transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!canSubmit}
             onClick={() => (trade.needApproval ? trade.doApprove() : trade.doTrade())}
           >

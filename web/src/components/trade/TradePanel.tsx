@@ -145,7 +145,7 @@ export function TradePanel({
         status: "success",
         hash: trade.tradeHash,
         title: "Position opened",
-        detail: "Assets were settled to your wallet instantly — view them on the positions page.",
+        detail: "Assets are in your wallet — view them on the positions page.",
       };
     }
     if (trade.phase === "error" && trade.error) {
@@ -202,7 +202,7 @@ export function TradePanel({
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                side === "bull" ? "bg-primary text-black" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
+                side === "bull" ? "bg-l-cyan text-bull" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
               }`}
               onClick={() => setManualSide("bull")}
             >
@@ -210,7 +210,7 @@ export function TradePanel({
             </button>
             <button
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                side === "bear" ? "bg-primary text-black" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
+                side === "bear" ? "bg-l-orange text-bear" : "bg-card-border/40 text-text-dim hover:bg-card-border/60"
               }`}
               onClick={() => setManualSide("bear")}
             >
@@ -249,11 +249,7 @@ export function TradePanel({
 
           {/* order button */}
           <button
-            className={`mt-3 w-full rounded-lg py-3 text-sm font-bold transition-colors disabled:cursor-not-allowed ${
-              side === "bull"
-                ? "bg-bull text-white hover:bg-bull/90 disabled:bg-bull/40"
-                : "bg-bear text-white hover:bg-bear/90 disabled:bg-bear/40"
-            }`}
+            className="mt-3 w-full rounded-lg bg-primary py-3 text-sm font-bold text-white transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!canTrade}
             onClick={() => (trade.needApproval ? trade.doApprove() : trade.doTrade())}
           >

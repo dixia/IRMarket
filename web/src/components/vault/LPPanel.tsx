@@ -143,7 +143,7 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-card-border bg-card p-4">
           <h3 className="font-semibold">Deposit</h3>
-          <label className="mt-3 block text-xs text-text-dim">Amount ({quoteMeta.symbol})</label>
+          <label className="kicker mt-3 block text-text-dim">Amount ({quoteMeta.symbol})</label>
           <input
             className="mt-1 w-full rounded-lg border border-card-border bg-bg-dark px-3 py-2 text-sm font-mono focus:border-primary outline-none"
             value={depositInput}
@@ -158,7 +158,7 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
             )}
           </div>
           <button
-            className="mt-3 w-full rounded-lg bg-primary py-3 text-sm font-bold text-black transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 w-full rounded-lg bg-primary py-3 text-sm font-bold text-white transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!canDeposit}
             onClick={onDeposit}
           >
@@ -169,7 +169,7 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
         <div className="rounded-xl border border-card-border bg-card p-4">
           <h3 className="font-semibold">Withdraw</h3>
           <div className="mt-3 flex items-center justify-between">
-            <label className="block text-xs text-text-dim">Shares</label>
+            <label className="kicker block text-text-dim">Shares</label>
             <button
               className="text-xs text-primary hover:underline"
               onClick={() => setWithdrawInput(formatUnits(stats.shares ?? 0n, decimals))}
@@ -208,7 +208,7 @@ export function LPPanel({ account }: { account?: `0x${string}` }) {
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-lg border border-card-border bg-bg-dark p-3">
-      <div className="text-xs text-text-dim">{label}</div>
+      <div className="kicker text-text-dim">{label}</div>
       <div className={`mt-0.5 text-sm font-semibold ${accent ? "text-primary" : ""}`}>{value}</div>
     </div>
   );

@@ -60,11 +60,11 @@ export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => v
         ) : (
           <>
             <p className="mt-2 text-sm text-text-dim">
-              Claim <span className="text-primary">{formatAmount(FAUCET_AMOUNT, baseMeta.decimals, 0)} {baseMeta.symbol}</span> and{" "}
-              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, quoteMeta.decimals, 0)} {quoteMeta.symbol}</span> for free (test tokens to try out trading).
+              Claim <span className="text-primary">{formatAmount(FAUCET_AMOUNT, baseMeta.decimals, 4)} {baseMeta.symbol}</span> and{" "}
+              <span className="text-primary">{formatAmount(FAUCET_AMOUNT, quoteMeta.decimals, 4)} {quoteMeta.symbol}</span> for free (test tokens to try out trading).
             </p>
 
-            <label className="mt-4 block text-xs text-text-dim">Recipient address</label>
+            <label className="kicker mt-4 block text-text-dim">Recipient address</label>
             <input
               className="mt-1 w-full rounded-lg border border-card-border bg-bg-dark px-3 py-2 text-sm font-mono focus:border-primary outline-none"
               value={target}
@@ -73,7 +73,7 @@ export function FaucetModal({ open, onClose }: { open: boolean; onClose: () => v
             />
 
             <button
-              className="mt-4 w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-black hover:bg-primary-dim disabled:opacity-50 transition-colors"
+              className="mt-4 w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-white hover:bg-primary-dim disabled:opacity-50 transition-colors"
               disabled={busy || !target}
               onClick={mint}
             >

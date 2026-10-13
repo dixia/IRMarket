@@ -68,7 +68,7 @@ function TabButton({
   return (
     <button
       className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-        active ? "bg-primary text-black" : "bg-card text-text-dim hover:text-text"
+        active ? "bg-primary text-white" : "bg-card text-text-dim hover:text-text"
       }`}
       onClick={onClick}
     >
