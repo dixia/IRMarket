@@ -13,6 +13,11 @@
  * anvil — falls back to the node's unlocked account 0), FEE_BPS (100), SMOKE=0 to skip the
  * lifecycle walkthrough, MINE=1 to force evm_mine on a non-31337 chain.
  *
+ * Reuse mode (deploy ONLY the vault against an existing stack): set ORACLE_ADDRESS,
+ * PRICE_BASE and SETTLEMENT_TOKEN together (BASE_TOKEN/QUOTE_TOKEN are accepted as legacy
+ * aliases). The vault is single-asset: `settlementToken` is the only asset it custodies and
+ * `priceBase` is just the Monoracle pair key.
+ *
  * Writes the addresses to `deployment-vault.json` (gitignored).
  */
 import "dotenv/config";
@@ -30,11 +35,12 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const FEE_BPS = BigInt(process.env.FEE_BPS || "100");
 // Reuse an existing oracle/token stack (deploy ONLY the vault). Set ORACLE_ADDRESS,
-// BASE_TOKEN and QUOTE_TOKEN together to point the vault at a live market (e.g. the V0.9
-// test tokens) instead of deploying a fresh MonoracleMock + MockERC20 pair.
+// PRICE_BASE and SETTLEMENT_TOKEN together to point the vault at a live market (e.g. the
+// V0.9 test tokens) instead of deploying a fresh MonoracleMock + MockERC20 pair.
+// BASE_TOKEN/QUOTE_TOKEN are accepted as legacy aliases for PRICE_BASE/SETTLEMENT_TOKEN.
 const REUSE_ORACLE = process.env.ORACLE_ADDRESS;
-const REUSE_BASE = process.env.BASE_TOKEN;
-const REUSE_QUOTE = process.env.QUOTE_TOKEN;
+const REUSE_BASE = process.env.PRICE_BASE || process.env.BASE_TOKEN;
+const REUSE_QUOTE = process.env.SETTLEMENT_TOKEN || process.env.QUOTE_TOKEN;
 const REUSE = Boolean(REUSE_ORACLE && REUSE_BASE && REUSE_QUOTE);
 const RUN_SMOKE = process.env.SMOKE !== "0" && !REUSE;
 const E18 = 10n ** 18n;
@@ -71,8 +77,8 @@ async function main() {
   let oracle, base, quote;
   if (REUSE) {
     console.log(`  reusing oracle ${REUSE_ORACLE}`);
-    console.log(`  reusing base   ${REUSE_BASE}`);
-    console.log(`  reusing quote  ${REUSE_QUOTE}`);
+    console.log(`  reusing priceBase ${REUSE_BASE}`);
+    console.log(`  reusing settlementToken ${REUSE_QUOTE}`);
     oracle = { address: REUSE_ORACLE, abi: getArtifact("contracts/test/MonoracleMock.sol/MonoracleMock.json").abi };
     base = { address: REUSE_BASE, abi: getArtifact("contracts/MockERC20.sol/MockERC20.json").abi };
     quote = { address: REUSE_QUOTE, abi: getArtifact("contracts/MockERC20.sol/MockERC20.json").abi };
@@ -166,8 +172,8 @@ async function main() {
   fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(info, null, 2));
   console.log("\nSaved deployment-vault.json");
   console.log(`  ORACLE_ADDRESS=${oracle.address}`);
-  console.log(`  BASE_TOKEN=${base.address}`);
-  console.log(`  QUOTE_TOKEN=${quote.address}`);
+  console.log(`  PRICE_BASE=${base.address}`);
+  console.log(`  SETTLEMENT_TOKEN=${quote.address}`);
   console.log(`  VAULT_ADDRESS=${vault.address}`);
 }
 

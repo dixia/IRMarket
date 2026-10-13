@@ -38,7 +38,7 @@ in `settlementToken`.
 
 | Contract | Address |
 |---|---|
-| `IRMarketVault` | `0x8995b6524f7809d9472dff0dDD06512DA5BCe380` |
+| `IRMarketVault` | `0xDf1BdE04532ED1Bd0DF3fc92A0f0853e904a8188` |
 | Monoracle (V0.9 app oracle) | `0xb6523DA6f177dB25d766a27575624B3e1fe0a00e` |
 | `priceBase` token (LLM) | `0xC065c5C371DFfcA7C167418810498506c57D1F35` |
 | `settlementToken` (HKD) | `0x34675029742e7E5Fea3637F68c911414a47F9752` |
@@ -46,9 +46,10 @@ in `settlementToken`.
 
 - These are also written to `deployment-vault.json` (repo root, gitignored) by
   `script/deploy-vault-rpc.js`.
-- **Reuse mode (what is deployed above):** set `ORACLE_ADDRESS`, `BASE_TOKEN` and `QUOTE_TOKEN`
-  and the script deploys **only** the vault against that existing stack (it skips the smoke
-  test). Without those env vars it deploys a fresh `MonoracleMock` + `MockERC20` pair instead.
+- **Reuse mode (what is deployed above):** set `ORACLE_ADDRESS`, `PRICE_BASE` and
+  `SETTLEMENT_TOKEN` and the script deploys **only** the vault against that existing stack (it
+  skips the smoke test). `BASE_TOKEN`/`QUOTE_TOKEN` are accepted as legacy aliases. Without those
+  env vars it deploys a fresh `MonoracleMock` + `MockERC20` pair instead.
 - **Local dev:** run `anvil` (Foundry, in WSL) then `node script/deploy-vault-rpc.js` — it
   deploys a fresh stack and prints addresses (anvil chainId `31337`, RPC `http://127.0.0.1:8545`).
 - The standalone stack was lifecycle smoke-tested on both anvil and Monad (LP deposit → open
