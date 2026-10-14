@@ -21,6 +21,7 @@ trade, zero-sum (D-10); the 1% wrapper fee lands at market.marketMaker in HKD.
 
 import logging
 import os
+import random
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -197,14 +198,21 @@ def resolve_pairs(explicit: Optional[str] = None) -> tuple[dict, list[PairConfig
 
 
 class PriceFeed:
-    """Fair-price source. Demo: static env price (B5 — live 06658.HK feed to be
-    pinned at dev time; swap `get()` for the real fetch here)."""
+    """Fair-price source. Demo: a bounded random walk around the configured base price
+    so the quoted (canonical) price visibly moves. Swap `get()` for a real feed in prod.
+    Jitter band is `PRICE_JITTER_BPS` (default 300 = ±3%), clamped to ±20% of the base."""
 
     def __init__(self, fair_price: int):
         self.fair = int(fair_price)
+        self.current = int(fair_price)
+        self.jitter = int(os.getenv("PRICE_JITTER_BPS", "300")) / 10_000
 
     def get(self, _block: int) -> int:
-        return self.fair
+        if self.jitter > 0:
+            self.current = int(self.current * (1 + random.uniform(-self.jitter, self.jitter)))
+            lo, hi = int(self.fair * 0.8), int(self.fair * 1.2)
+            self.current = max(lo, min(hi, self.current))
+        return self.current
 
 
 class MarketMakerBot:
@@ -240,6 +248,9 @@ class MarketMakerBot:
         self.lead_blocks = int(os.getenv("SETTLEMENT_QUOTE_LEAD_BLOCKS", "2"))
         self.round_blocks = int(os.getenv("ROUND_BLOCKS", "6000"))  # ~30 min @300ms
         self.auto_create = os.getenv("AUTO_CREATE_MARKET", "1") == "1"
+        # Demo: re-quote every loop (even with an active quote) so the canonical price
+        # keeps moving; off by default (production holds one active quote per round).
+        self.requote = os.getenv("REQUOTE_EVERY_LOOP", "0") == "1"
         self.poll_seconds = float(os.getenv("QUOTE_INTERVAL_SECONDS", "5"))
 
         base_amount = int(os.getenv("QUOTE_BASE_AMOUNT", str(1 * E18)))
@@ -529,7 +540,7 @@ class MarketMakerBot:
             # final settlement quote = mark (D-06/FR-BOT-002)
             self.submit_quote(expiry, "final settlement quote")
             self._final_submitted = True
-        elif active is None:
+        elif active is None or self.requote:
             self.submit_quote(expiry, "restock quote")
 
     def run(self, once: bool = False) -> None:

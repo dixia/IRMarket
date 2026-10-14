@@ -42,7 +42,7 @@ async function readQuote(
     })
     .catch(() => null);
   if (!q) return null;
-  const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, , expiryBlock] = q as readonly [
+  const [provider, baseToken, quoteToken, baseAmount, quoteAmount, price, , , expiryBlock] = q as readonly [
     `0x${string}`,
     `0x${string}`,
     `0x${string}`,

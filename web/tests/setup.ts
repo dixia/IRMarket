@@ -93,7 +93,10 @@ export default async function globalSetup() {
   // fails on the local stack: ??? symbols, — balances, "Price unavailable".
   try {
     const mc3 = fs.readFileSync(path.join(import.meta.dirname!, "helpers", "multicall3-bytecode.txt"), "utf8").trim();
-    await publicClient.request({ method: "anvil_setCode", params: ["0xcA11bde05977b3631167028862bE2a173976CA11", mc3] });
+    await (publicClient.request as unknown as (a: { method: string; params: unknown[] }) => Promise<unknown>)({
+      method: "anvil_setCode",
+      params: ["0xcA11bde05977b3631167028862bE2a173976CA11", mc3],
+    });
     console.log("[Setup] Multicall3 set at 0xcA11…CA11");
   } catch (e) {
     console.log("[Setup] WARN: could not set Multicall3:", e instanceof Error ? e.message : e);
