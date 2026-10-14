@@ -88,6 +88,17 @@ export default async function globalSetup() {
   await waitForAnvil();
   console.log("[Setup] Anvil node is ready.");
 
+  // PR #6 points wagmi's chain config at Multicall3 (0xcA11…), which exists on Monad
+  // testnet but not on a fresh anvil. Without it every batched read (useReadContracts)
+  // fails on the local stack: ??? symbols, — balances, "Price unavailable".
+  try {
+    const mc3 = fs.readFileSync(path.join(import.meta.dirname!, "helpers", "multicall3-bytecode.txt"), "utf8").trim();
+    await publicClient.request({ method: "anvil_setCode", params: ["0xcA11bde05977b3631167028862bE2a173976CA11", mc3] });
+    console.log("[Setup] Multicall3 set at 0xcA11…CA11");
+  } catch (e) {
+    console.log("[Setup] WARN: could not set Multicall3:", e instanceof Error ? e.message : e);
+  }
+
   console.log("[Setup] Deploying contracts...");
   const { deployContracts } = await import("./helpers/deploy.js");
   const deployed = await deployContracts();
