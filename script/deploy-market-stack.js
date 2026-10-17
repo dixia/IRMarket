@@ -51,7 +51,18 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45";
+const ASSETS_RAW = process.env.ASSETS || "NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514";
+
+// Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
+// price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
+const FEED_DESCRIPTORS = {
+  NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
+  SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
+  SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
+  GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
+  DEEPSEEK: { priceSource: "synthetic" },
+};
+const feedDescriptor = (symbol) => FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
 
 const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS;
 if (!ORACLE_ADDRESS) {
@@ -286,6 +297,7 @@ async function main() {
       fairPrice: asset.fairPrice.toString(),
       marketId,
       expiryBlock: expiryBlock.toString(),
+      ...feedDescriptor(asset.symbol),
     });
   }
 
