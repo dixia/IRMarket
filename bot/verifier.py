@@ -32,12 +32,12 @@ from dotenv import load_dotenv
 from web3 import Web3
 
 try:  # script dir on sys.path when run as `python bot/verifier.py`
-    from price_feed import PriceFeed, build_feed  # PriceFeed re-exported for backwards compatibility
+    from price_feed import FeedOutageError, build_feed
 except ImportError:  # imported as a package (bot.verifier) rather than a script
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from price_feed import PriceFeed, build_feed  # PriceFeed re-exported for backwards compatibility
+    from price_feed import FeedOutageError, build_feed
 
 # Load bot/.env by EXPLICIT PATH, not via a bare load_dotenv().
 #
@@ -655,7 +655,13 @@ class MarketMakerBot:
                 f"({max_expiry}); upstream Monoracle would revert ExpiryTooFar"
             )
         if fair is None:
-            fair = self.feed.get(block)
+            try:
+                fair = self.feed.get(block)
+            except FeedOutageError as e:
+                # Outage policy=halt: a possibly-15x-off seed mark is instantly veto-
+                # arbitrated. Refuse to quote; the loop retries next tick.
+                log.error("[%s] %s — NOT quoting this tick", self.symbol, e)
+                return None
         quote_amount = self.quote_base * fair // E18
         qid_before = self.oracle.functions.nextQuoteId().call()
         receipt = self._send(
@@ -759,15 +765,25 @@ class MarketMakerBot:
             if q["status"] not in (VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 continue
             base_amt, quote_amt = q["baseAmount"], q["quoteAmount"]
-            fair = self.feed.get(decision_block)
+            try:
+                fair = self.feed.get(decision_block)
+            except FeedOutageError as e:
+                # Feed outage: withdrawal itself does not depend on the mark,
+                # withdraw anyway but report PnL as unavailable (no seed guess).
+                log.error("[%s] %s — PnL unavailable for q%s (withdrawing anyway)", self.symbol, e, qid)
+                fair = None
             if q["status"] == VETOED_UNDERPRICED:
                 # we keep 2x quote, lose base
-                pnl_hkd = quote_amt - base_amt * fair // E18
                 side = "UNDERPRICED (trader went LONG)"
             else:
                 # we keep 2x base, lose quote
-                pnl_hkd = base_amt * fair // E18 - quote_amt
                 side = "OVERPRICED (trader went SHORT)"
+            if fair is None:
+                pnl_hkd = None
+            elif q["status"] == VETOED_UNDERPRICED:
+                pnl_hkd = quote_amt - base_amt * fair // E18
+            else:
+                pnl_hkd = base_amt * fair // E18 - quote_amt
             self._send(
                 self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}",
                 decision_block=decision_block, decision_ts=decision_ts,
@@ -776,7 +792,10 @@ class MarketMakerBot:
             self._pending_own.discard(qid)
             log.warning(
                 "[%s] VETO q%s %s | pnl≈%s HKD (base %s, quote %s, fair %s)",
-                self.symbol, qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
+                self.symbol, qid, side,
+                "N/A" if pnl_hkd is None else pnl_hkd / E18,
+                base_amt / E18, quote_amt / E18,
+                "N/A" if fair is None else fair,
             )
 
     def settle_round(self, round_expiry: int) -> None:
