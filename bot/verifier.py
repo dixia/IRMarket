@@ -21,13 +21,20 @@ trade, zero-sum (D-10); the 1% wrapper fee lands at market.marketMaker in HKD.
 
 import logging
 import os
-import random
 import time
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from web3 import Web3
+
+try:  # script dir on sys.path when run as `python bot/verifier.py`
+    from price_feed import FeedOutageError, build_feed
+except ImportError:  # imported as a package (bot.verifier) rather than a script
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from price_feed import FeedOutageError, build_feed
 
 # Load bot/.env by EXPLICIT PATH, not via a bare load_dotenv().
 #
@@ -65,7 +72,9 @@ MAX_VERIFICATION_SLOTS = 12000
 #   approve         33,586   live eth_estimateGas on the deployed quote token
 #   submit_quote   292,944   live eth_estimateGas on the deployed oracle
 #   settle          65,429   live eth_estimateGas on the deployed oracle
-#   withdraw        74,295   script/gas-report.js (settled + vetoed variants)
+#   withdraw       123,194   live eth_estimateGas on the UPSTREAM oracle (the old
+#                           fork needed only 74,295; 120,000 was too tight here and
+#                           made every withdraw revert out-of-gas)
 #   create_market 198,542   live eth_estimateGas on the deployed wrapper; it is
 #                           this high because createMarket makes two unconditional
 #                           forceApprove calls (contracts/IRMarket.sol). The guard
@@ -87,7 +96,7 @@ GAS_DEFAULTS = {
     "approve": 60_000,
     "submit_quote": 400_000,
     "settle": 100_000,
-    "withdraw": 120_000,
+    "withdraw": 200_000,
     "create_market": 250_000,
 }
 
@@ -138,6 +147,10 @@ class PairConfig:
         market_id: int,
         symbol: Optional[str] = None,
         expiry_block: Optional[int] = None,
+        price_source: Optional[str] = None,
+        price_symbol: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        fx_quote_per_usd: Optional[float] = None,
     ) -> None:
         self.base_token = base_token
         self.quote_token = quote_token
@@ -145,6 +158,12 @@ class PairConfig:
         self.market_id = int(market_id)
         self.symbol = symbol or base_token[:10]
         self.expiry_block = int(expiry_block) if expiry_block is not None else None
+        # Real-price-feed descriptors (docs/design/bot-real-price-feed-spec.md §6.1).
+        # Absent/None => the legacy synthetic walk (build_feed handles it).
+        self.price_source = price_source
+        self.price_symbol = price_symbol
+        self.asset_class = asset_class
+        self.fx_quote_per_usd = fx_quote_per_usd
 
 
 class BotContext:
@@ -241,6 +260,10 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
                 market_id=int(a.get("marketId", "0")),
                 symbol=a.get("symbol"),
                 expiry_block=a.get("expiryBlock"),
+                price_source=a.get("priceSource"),
+                price_symbol=a.get("priceSymbol"),
+                asset_class=a.get("assetClass"),
+                fx_quote_per_usd=a.get("fxQuotePerUsd"),
             )
         )
     return shared, pairs
@@ -279,24 +302,6 @@ def resolve_pairs(explicit: Optional[str] = None) -> tuple[dict, list[PairConfig
     return {}, [load_env_pair()]
 
 
-class PriceFeed:
-    """Fair-price source. Demo: a bounded random walk around the configured base price
-    so the quoted (canonical) price visibly moves. Swap `get()` for a real feed in prod.
-    Jitter band is `PRICE_JITTER_BPS` (default 300 = ±3%), clamped to ±20% of the base."""
-
-    def __init__(self, fair_price: int):
-        self.fair = int(fair_price)
-        self.current = int(fair_price)
-        self.jitter = int(os.getenv("PRICE_JITTER_BPS", "300")) / 10_000
-
-    def get(self, _block: int) -> int:
-        if self.jitter > 0:
-            self.current = int(self.current * (1 + random.uniform(-self.jitter, self.jitter)))
-            lo, hi = int(self.fair * 0.8), int(self.fair * 1.2)
-            self.current = max(lo, min(hi, self.current))
-        return self.current
-
-
 class MarketMakerBot:
     """Market maker for ONE pair. Chain resources come from a shared
     `BotContext`; pair-specific state (tokens, market id, own quotes, withdrawn
@@ -323,7 +328,7 @@ class MarketMakerBot:
         self.symbol = pair.symbol
         self.base_token = Web3.to_checksum_address(pair.base_token)
         self.quote_token = Web3.to_checksum_address(pair.quote_token)
-        self.feed = PriceFeed(pair.fair_price)
+        self.feed = build_feed(pair, log=log)
         self.expiry_hint = pair.expiry_block
 
         self.market_id = pair.market_id
@@ -458,7 +463,13 @@ class MarketMakerBot:
                 f"[{self.symbol}] expiry {expiry_block} > block+{MAX_VERIFICATION_SLOTS} "
                 f"({max_expiry}); upstream Monoracle would revert ExpiryTooFar"
             )
-        fair = self.feed.get(block)
+        try:
+            fair = self.feed.get(block)
+        except FeedOutageError as e:
+            # Outage policy=halt: a possibly-15x-off seed mark is instantly veto-
+            # arbitraged. Refuse to quote; the loop retries next tick.
+            log.error("[%s] %s — NOT quoting this tick", self.symbol, e)
+            return None
         quote_amount = self.quote_base * fair // E18
         qid_before = self.oracle.functions.nextQuoteId().call()
         receipt = self._send(
@@ -510,21 +521,35 @@ class MarketMakerBot:
             if q["status"] not in (VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 continue
             base_amt, quote_amt = q["baseAmount"], q["quoteAmount"]
-            fair = self.feed.get(self.w3.eth.block_number)
+            try:
+                fair = self.feed.get(self.w3.eth.block_number)
+            except FeedOutageError as e:
+                # Feed outage: withdrawal itself does not depend on the mark,
+                # withdraw anyway but report PnL as unavailable (no seed guess).
+                log.error("[%s] %s — PnL unavailable for q%s (withdrawing anyway)", self.symbol, e, qid)
+                fair = None
             if q["status"] == VETOED_UNDERPRICED:
                 # we keep 2x quote, lose base
-                pnl_hkd = quote_amt - base_amt * fair // E18
                 side = "UNDERPRICED (trader went LONG)"
             else:
                 # we keep 2x base, lose quote
-                pnl_hkd = base_amt * fair // E18 - quote_amt
                 side = "OVERPRICED (trader went SHORT)"
             self._send(self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}")
             self._withdrawn.add(qid)
-            log.warning(
-                "[%s] VETO q%s %s | pnl≈%s HKD (base %s, quote %s, fair %s)",
-                self.symbol, qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
-            )
+            if fair is None:
+                log.warning(
+                    "[%s] VETO q%s %s | pnl≈? HKD (base %s, quote %s, fair N/A)",
+                    self.symbol, qid, side, base_amt / E18, quote_amt / E18,
+                )
+            else:
+                if q["status"] == VETOED_UNDERPRICED:
+                    pnl_hkd = quote_amt - base_amt * fair // E18
+                else:
+                    pnl_hkd = base_amt * fair // E18 - quote_amt
+                log.warning(
+                    "[%s] VETO q%s %s | pnl≈%s HKD (base %s, quote %s, fair %s)",
+                    self.symbol, qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
+                )
 
     def settle_round(self, round_expiry: int) -> None:
         """After expiry: settle THIS round's ACTIVE quotes oldest-first; final quote last
