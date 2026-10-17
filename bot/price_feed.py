@@ -13,8 +13,10 @@ Design (see ``docs/design/bot-real-price-feed-spec.md`` §5):
   * ``SinaHKSource`` / ``TencentHKSource`` — HK (Sina primary, Tencent fallback);
     natively HKD.
   * ``FallbackSource`` — try sources in order, first success wins.
-  * ``CachedSource`` — TTL cache + last-good + staleness guard; never raises out
-    of ``get()``.
+  * ``CachedSource`` — TTL cache + last-good + staleness guard. On a total outage
+    (no last-good, or last-good older than ``PRICE_FEED_MAX_STALENESS_SECONDS``)
+    the outage policy applies (default ``halt`` = raise :class:`FeedOutageError`;
+    ``seed`` = legacy fallback to the ``fairPrice`` seed).
 
 Real sources BYPASS the ±20% clamp. Instead a sanity band rejects non-finite /
 ``<= 0`` / absurd WAD values, and an implausible jump is logged as a WARNING but
@@ -128,11 +130,11 @@ class PriceSource:
     """Base feed source. ``fetch(block)`` may raise; the default ``get(block)``
     applies the real-source sanity band + jump warning and returns a WAD int.
 
-    ``_last`` tracks the previous value for the jump check (class attr so
-    subclasses need no ``__init__`` cooperation)."""
+    ``_last`` (instance-level, created lazily in ``_guard``) tracks the previous
+    value for the jump check, so subclasses need no ``__init__`` cooperation and
+    no shared-class-attribute footgun."""
 
     name = "source"
-    _last = None
 
     def fetch(self, block: int) -> int:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -148,7 +150,7 @@ class PriceSource:
         sanity_max = int(_env_float("PRICE_SANITY_MAX", 1e9) * WAD)
         if value > sanity_max:
             raise ValueError(f"{self.name}: price {value} exceeds sanity max {sanity_max}")
-        last = self._last
+        last = self.__dict__.setdefault("_last", None)
         if last:
             jump_bps = abs(value - last) * 10_000.0 / last
             if jump_bps > _env_float("PRICE_MAX_JUMP_BPS", 5000):
@@ -317,18 +319,40 @@ class FallbackSource(PriceSource):
         raise RuntimeError("fallback: no sources configured")
 
 
+class FeedOutageError(RuntimeError):
+    """No usable price is available.
+
+    Raised (default outage policy ``halt``) when the feed is down and there is
+    nothing legitimate to return: never-fetched, or last-good older than
+    ``PRICE_FEED_MAX_STALENESS_SECONDS``. Callers must NOT quote off a stale
+    ``fairPrice`` seed — a 15x-off mark is instantly veto-arbitraged. Use
+    ``PRICE_FEED_OUTAGE_POLICY=seed`` to restore the legacy seed fallback."""
+
+
 class CachedSource(PriceSource):
     """TTL cache + last-good + staleness guard around an inner source.
 
     * fresh (age < ttl)        -> cached value, no fetch
     * age ≥ ttl                -> refetch; on success update cache
     * all sources error        -> if age < max_staleness: last-good + WARNING
-                                  else: seed_wad + ERROR
-    * ``get()`` NEVER raises."""
+                                  else: outage policy:
+                                    - ``halt`` (default): raise FeedOutageError
+                                    - ``seed``: seed_wad + ERROR (legacy; the
+                                      seed MUST be refreshed to real values)
+    * a zero/absent seed under the ``seed`` policy also raises (a zero mark
+      silently mints a zero quote amount)."""
 
     name = "cached"
 
-    def __init__(self, inner, ttl_seconds=None, max_staleness_seconds=None, seed_wad=0, log=None):
+    def __init__(
+        self,
+        inner,
+        ttl_seconds=None,
+        max_staleness_seconds=None,
+        seed_wad=0,
+        log=None,
+        outage_policy=None,
+    ):
         self.inner = inner
         self._ttl_s = None if ttl_seconds is None else float(ttl_seconds)
         self._max_s = None if max_staleness_seconds is None else float(max_staleness_seconds)
@@ -336,6 +360,10 @@ class CachedSource(PriceSource):
         self._value = None
         self._at = 0.0
         self._log = log or globals()["log"]
+        policy = outage_policy if outage_policy is not None else os.getenv(
+            "PRICE_FEED_OUTAGE_POLICY", "halt"
+        )
+        self._halt_on_outage = str(policy).strip().lower() != "seed"
 
     def _ttl(self) -> float:
         return self._ttl_s if self._ttl_s is not None else _env_float("PRICE_FEED_TTL_SECONDS", 60)
@@ -356,11 +384,24 @@ class CachedSource(PriceSource):
             self._value = value
             self._at = now
             return value
-        except Exception as e:  # noqa: BLE001 - cache must never raise out of get()
+        except Exception as e:  # noqa: BLE001 - non-outage failures stay internal
             if have and age < self._max():
                 self._log.warning("stale price (age %.0fs) — using last-good: %s", age, e)
                 return self._value
-            self._log.error("price feed down beyond staleness — using seed: %s", e)
+            # Total outage: no last-good, or last-good beyond staleness.
+            if self._halt_on_outage:
+                self._log.error(
+                    "price feed down %s — refusing to quote (outage policy=halt): %s",
+                    f"(last {age:.0f}s ago) " if have else "(nothing fetched yet) ",
+                    e,
+                )
+                raise FeedOutageError(
+                    f"no usable price: feed down {f'{age:.0f}s' if have else 'since start'}"
+                ) from e
+            if self.seed <= 0:
+                self._log.error("price feed down and seed unusable (%s) — cannot price: %s", self.seed, e)
+                raise FeedOutageError(f"no usable price: feed down and seed={self.seed}") from e
+            self._log.error("price feed down beyond staleness — using seed (outage policy=seed): %s", e)
             return self.seed
 
 

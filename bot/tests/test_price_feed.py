@@ -168,7 +168,9 @@ class CachedSourceTests(unittest.TestCase):
 
     def test_past_max_returns_seed_and_logs_error(self):
         inner = _CountSource(42 * WAD)
-        cache = price_feed.CachedSource(inner, ttl_seconds=0, max_staleness_seconds=3600, seed_wad=7 * WAD)
+        cache = price_feed.CachedSource(
+            inner, ttl_seconds=0, max_staleness_seconds=3600, seed_wad=7 * WAD, outage_policy="seed"
+        )
         self.assertEqual(cache.get(1), 42 * WAD)
         cache.inner = _RaisingSource()
         cache._at = time.time() - 4000
@@ -176,9 +178,45 @@ class CachedSourceTests(unittest.TestCase):
             self.assertEqual(cache.get(2), 7 * WAD)
 
     def test_never_raises_when_never_fetched(self):
-        cache = price_feed.CachedSource(_RaisingSource(), ttl_seconds=0, seed_wad=9 * WAD)
+        cache = price_feed.CachedSource(
+            _RaisingSource(), ttl_seconds=0, seed_wad=9 * WAD, outage_policy="seed"
+        )
         with self.assertLogs("irmarket-bot.price-feed", level="ERROR"):
             self.assertEqual(cache.get(1), 9 * WAD)
+
+    # ---- outage policy (default halt) -------------------------------------
+
+    def test_halt_raises_when_never_fetched(self):
+        cache = price_feed.CachedSource(_RaisingSource(), ttl_seconds=0, seed_wad=9 * WAD)
+        with self.assertRaises(price_feed.FeedOutageError):
+            cache.get(1)
+
+    def test_halt_raises_past_staleness_even_with_last_good(self):
+        inner = _CountSource(42 * WAD)
+        cache = price_feed.CachedSource(inner, ttl_seconds=0, max_staleness_seconds=3600, seed_wad=7 * WAD)
+        self.assertEqual(cache.get(1), 42 * WAD)
+        cache.inner = _RaisingSource()
+        cache._at = time.time() - 4000
+        with self.assertRaises(price_feed.FeedOutageError):
+            cache.get(2)
+
+    def test_seed_policy_zero_seed_raises(self):
+        cache = price_feed.CachedSource(
+            _RaisingSource(), ttl_seconds=0, seed_wad=0, outage_policy="seed"
+        )
+        with self.assertRaises(price_feed.FeedOutageError):
+            cache.get(1)
+
+    def test_policy_from_env(self):
+        import os as _os
+        from unittest import mock as _mock
+
+        with _mock.patch.dict(_os.environ, {"PRICE_FEED_OUTAGE_POLICY": "seed"}):
+            cache = price_feed.CachedSource(_RaisingSource(), ttl_seconds=0, seed_wad=3 * WAD)
+            self.assertFalse(cache._halt_on_outage)
+        with _mock.patch.dict(_os.environ, {"PRICE_FEED_OUTAGE_POLICY": "halt"}):
+            cache = price_feed.CachedSource(_RaisingSource(), ttl_seconds=0, seed_wad=3 * WAD)
+            self.assertTrue(cache._halt_on_outage)
 
 
 # ------------------------------------------------------------------- FallbackSource

@@ -162,24 +162,26 @@ class PriceSource(Protocol):
 - `SinaHKSource(code)` — `GET https://hq.sinajs.cn/list=hk{code}`, parse field 6 (last).
 - `TencentHKSource(code)` — `GET https://qt.gtimg.cn/q=hk{code}`, parse field 3 (last).
 - `FallbackSource([s1, s2, …])` — try each; first success wins.
-- `CachedSource(inner, ttl_seconds, max_staleness_seconds, seed_wad)` — TTL cache + last-good
-  value + staleness guard (below).
+- `CachedSource(inner, ttl_seconds, max_staleness_seconds, seed_wad, outage_policy)` — TTL
+  cache + last-good value + staleness guard (below).
 
 Factory:
 
 ```python
-def build_feed(pair: PairConfig, block: int) -> PriceSource:
-    src = pair.price_source or ("synthetic" if os.getenv("PRICE_FEED_ENABLED","0")!="1" else "auto")
+def build_feed(pair: PairConfig, log: Optional[logging.Logger] = None) -> PriceSource:
+    # PRICE_FEED_ENABLED != "1" (or synthetic/unknown/missing-symbol source) → synthetic
     ...
 ```
 
-`MarketMakerBot.__init__` changes one line to `self.feed = build_feed(pair, …)`; the main loop
-keeps calling `self.feed.get(block)`. **No other bot changes required.**
+`MarketMakerBot.__init__` changes one line to `self.feed = build_feed(pair, log=log)`; the main
+loop keeps calling `self.feed.get(block)`. **No other bot changes required** — except the
+outage policy below (quote refusal).
 
 ### 5.2 Unit & scale
 
 - Feed returns a `float` price (USD for US names, HKD for GLM); convert to WAD via
-  `int(round(price * 1e18))`.
+  `Decimal` half-up quantization (`Decimal(str(price)).quantize(1e-18-ish)` → int WAD —
+  implemented, slightly better than `int(round(price * 1e18))` for float-precision edge cases).
 - Parse must reject non-finite / `N/A` / empty and fall through the fallback chain.
 - Keep the value an `int` WAD — the quote math (`quote_base * fair // E18`) is unchanged.
 
@@ -188,19 +190,29 @@ keeps calling `self.feed.get(block)`. **No other bot changes required.**
 ```
 request ─▶ CachedSource
              ├─ fresh (age < ttl)      → return cached
-             ├─ stale (ttl ≤ age < max) → return last-good + log WARNING (stale)
-             └─ error on all sources    → if age < max: last-good; else: seed_wad + ALERT
+             ├─ refetch stale (ttl ≤ age): success → update cache; error → fall through
+             ├─ error on all sources, last-good fresh-enough (age < max)
+             |                          → return last-good + log WARNING (stale)
+             └─ total outage (no last-good, or age ≥ max) → outage policy:
+                  halt  → raise FeedOutageError; the bot does NOT quote this tick
+                  seed  → legacy: fairPrice seed + log ERROR
+                  (a zero/absent seed raises under BOTH policies)
 ```
 
 - `ttl_seconds` default **60** — one fetch/min/asset; never fetch on every 5 s quote loop
   (rate-limit safety across 4–5 pairs).
-- `max_staleness_seconds` default **3600**; beyond it, log at ERROR and fall back to the
-  configured `fairPrice` seed (the bot must not hard-fail — it keeps quoting).
+- `max_staleness_seconds` default **3600**; beyond it the outage policy applies.
+- **Outage policy (`PRICE_FEED_OUTAGE_POLICY`) default `halt`** (review feedback on PR #21):
+  falling back to a `fairPrice` seed that is 15x off reality (SNDK 88 vs ≈1,394) makes the
+  mark instantly veto-arbitraged. So the bot **refuses to quote** while no usable real price
+  exists. `bot/verifier.py`: `submit_quote` catches `FeedOutageError` and skips the quote
+  (loop retries next tick); `watch_vetoes` withdraws anyway (withdrawal doesn't need a mark)
+  but reports PnL as unavailable. Use `seed` only after refreshing `fairPrice` to real values.
 - `marketStatus == "Closed"` (equities) is **not** an error: the last sale is a valid
   (frozen) mark; log at DEBUG + record `lastTradeTimestamp` so the demo can explain a
   non-moving price.
-- Fallback chain per asset: equities `nasdaq → yahoo → last-good → seed`; HK
-  `sina → tencent → last-good → seed`; synthetic-only `seed`.
+- Fallback chain per asset: equities `nasdaq → yahoo → last-good → halt`; HK
+  `sina → tencent → last-good → halt`; under `seed` policy the chain ends at the seed.
 
 ### 5.4 FX (quote unit)
 
@@ -252,10 +264,12 @@ Existing entries gain two fields (`priceSource`, `priceSymbol`; `assetClass` def
 |---|---|---|
 | `PRICE_FEED_ENABLED` | `0` | master switch; `0` = current synthetic demo behaviour |
 | `PRICE_FEED_TTL_SECONDS` | `60` | per-asset cache TTL |
-| `PRICE_FEED_MAX_STALENESS_SECONDS` | `3600` | beyond → seed + ERROR |
+| `PRICE_FEED_MAX_STALENESS_SECONDS` | `3600` | beyond → outage policy applies |
+| `PRICE_FEED_OUTAGE_POLICY` | `halt` | `halt` = refuse to quote on no-usable-price (default, §5.3); `seed` = legacy fairPrice fallback |
 | `FX_QUOTE_PER_USD` | `1.0` | quote-per-USD multiplier (§5.4) |
 | `PRICE_FEED_FALLBACK` | `1` | enable secondary source (yahoo / tencent) |
 | `NASDAQ_API_BASE` | `https://api.nasdaq.com/api/quote` | override/testing |
+| `YAHOO_API_BASE` | `https://query1.finance.yahoo.com` | override/testing |
 | `SINA_API_BASE` | `https://hq.sinajs.cn` | override/testing |
 | `TENCENT_API_BASE` | `https://qt.gtimg.cn` | override/testing |
 | `PRICE_MAX_JUMP_BPS` | `5000` | warn-only jump threshold |
@@ -317,16 +331,17 @@ timeout-bounded (≈5 s) and wrapped so an exception can never bubble into `step
 ## 10. Acceptance criteria & tests
 
 **Unit (new `bot/tests/`, no chain):**
-- [ ] `NasdaqSource` parses `"$514.71"` → `514710000000000000000` WAD; `"$1,394.83"` →
+- [x] `NasdaqSource` parses `"$514.71"` → `514710000000000000000` WAD; `"$1,394.83"` →
       `1394830000000000000000`; rejects `"N/A"`/`""`.
-- [ ] `SinaHKSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6;
+- [x] `SinaHKSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6;
       `TencentHKSource` parses `v_hk02513="…~02513~518.000~…"` → field 3.
-- [ ] GBK company-name bytes decode without raising (`errors="replace"`).
-- [ ] `CachedSource`: within TTL no second HTTP call; past TTL refetches; all-sources-down but
-      within `max_staleness` returns last-good; past it returns seed and logs ERROR.
-- [ ] `FallbackSource`: primary 500 → secondary value returned (Sina down → Tencent).
-- [ ] `SyntheticWalkSource` still clamps to ±20% of seed (regression guard).
-- [ ] `build_feed` picks source from `priceSource`; unknown ⇒ synthetic.
+- [x] GBK company-name bytes decode without raising (`errors="replace"`).
+- [x] `CachedSource`: within TTL no second HTTP call; past TTL refetches; all-sources-down but
+      within `max_staleness` returns last-good; past it the outage policy applies (default
+      `halt` raises `FeedOutageError`; `seed` returns the seed with ERROR; zero seed raises).
+- [x] `FallbackSource`: primary 500 → secondary value returned (Sina down → Tencent).
+- [x] `SyntheticWalkSource` still clamps to ±20% of seed (regression guard).
+- [x] `build_feed` picks source from `priceSource`; unknown ⇒ synthetic.
 
 **Integration (testnet):**
 - [ ] `PRICE_FEED_ENABLED=1 python bot/verifier.py --once` logs real prices for all 5 pairs.
