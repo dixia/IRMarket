@@ -24,13 +24,20 @@ trade, zero-sum (D-10); the 1% wrapper fee lands at market.marketMaker in HKD.
 
 import logging
 import os
-import random
 import time
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from web3 import Web3
+
+try:  # script dir on sys.path when run as `python bot/verifier.py`
+    from price_feed import PriceFeed, build_feed  # PriceFeed re-exported for backwards compatibility
+except ImportError:  # imported as a package (bot.verifier) rather than a script
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from price_feed import PriceFeed, build_feed  # PriceFeed re-exported for backwards compatibility
 
 # Load bot/.env by EXPLICIT PATH, not via a bare load_dotenv().
 #
@@ -156,6 +163,10 @@ class PairConfig:
         market_id: int,
         symbol: Optional[str] = None,
         expiry_block: Optional[int] = None,
+        price_source: Optional[str] = None,
+        price_symbol: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        fx_quote_per_usd: Optional[float] = None,
     ) -> None:
         self.base_token = base_token
         self.quote_token = quote_token
@@ -163,6 +174,12 @@ class PairConfig:
         self.market_id = int(market_id)
         self.symbol = symbol or base_token[:10]
         self.expiry_block = int(expiry_block) if expiry_block is not None else None
+        # Real-price-feed descriptors (docs/design/bot-real-price-feed-spec.md §6.1).
+        # Absent/None => the legacy synthetic walk (build_feed handles it).
+        self.price_source = price_source
+        self.price_symbol = price_symbol
+        self.asset_class = asset_class
+        self.fx_quote_per_usd = fx_quote_per_usd
 
 
 class BotContext:
@@ -259,6 +276,10 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
                 market_id=int(a.get("marketId", "0")),
                 symbol=a.get("symbol"),
                 expiry_block=a.get("expiryBlock"),
+                price_source=a.get("priceSource"),
+                price_symbol=a.get("priceSymbol"),
+                asset_class=a.get("assetClass"),
+                fx_quote_per_usd=a.get("fxQuotePerUsd"),
             )
         )
     return shared, pairs
@@ -297,24 +318,6 @@ def resolve_pairs(explicit: Optional[str] = None) -> tuple[dict, list[PairConfig
     return {}, [load_env_pair()]
 
 
-class PriceFeed:
-    """Fair-price source. Demo: a bounded random walk around the configured base price
-    so the quoted (canonical) price visibly moves. Swap `get()` for a real feed in prod.
-    Jitter band is `PRICE_JITTER_BPS` (default 300 = ±3%), clamped to ±20% of the base."""
-
-    def __init__(self, fair_price: int):
-        self.fair = int(fair_price)
-        self.current = int(fair_price)
-        self.jitter = int(os.getenv("PRICE_JITTER_BPS", "300")) / 10_000
-
-    def get(self, _block: int) -> int:
-        if self.jitter > 0:
-            self.current = int(self.current * (1 + random.uniform(-self.jitter, self.jitter)))
-            lo, hi = int(self.fair * 0.8), int(self.fair * 1.2)
-            self.current = max(lo, min(hi, self.current))
-        return self.current
-
-
 class MarketMakerBot:
     """Market maker for ONE pair. Chain resources come from a shared
     `BotContext`; pair-specific state (tokens, market id, own quotes, withdrawn
@@ -341,7 +344,7 @@ class MarketMakerBot:
         self.symbol = pair.symbol
         self.base_token = Web3.to_checksum_address(pair.base_token)
         self.quote_token = Web3.to_checksum_address(pair.quote_token)
-        self.feed = PriceFeed(pair.fair_price)
+        self.feed = build_feed(pair, log=log)
         self.expiry_hint = pair.expiry_block
 
         self.market_id = pair.market_id
