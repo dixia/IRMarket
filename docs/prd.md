@@ -378,6 +378,9 @@ Vault 页（canonical 价格头 + MVP 限制横幅）
 
 - **D-13 窗口 = 期权到期日**：否决窗口由上游固定 2-slot 放大为 **quote 级 `expiryBlock` = 本轮到期块**（否决挑战期与期权期限是同一回事）；实现 = 自部署分叉 `contracts/Monoracle.sol`（派生上游，唯一改动，用户批准的唯一破例）
 - **D-14 市场不去重**：同一标的多市场并存（不同到期/费率），到期后再上新轮次；createMarket 永远新建 marketId
+  **〔运行模型更新，docs/plan/one-market-per-pair-plan.md〕**：15 分钟轮次模型下每个 pair 保持**一个长生命周期市场**；
+  轮次由 **quote 的 expiryBlock** 定义（market.expiryBlock 为 inert，`openLong` 只校验 quote），bot 循环内**永不**调 createMarket
+  （deploy 脚本按 pair 创建/复用一个市场）——语义不变，轮次载体从 market 迁移到 quote
 - **D-15 不限报价来源**：wrapper 允许 veto 任何 provider 的报价；1% 费用归注册 MM
 - **D-16 手续费 HKD 计**：`feeBps × quoteAmount / 10000`（HKD）；看涨加在付入端、看跌从收付出扣
 

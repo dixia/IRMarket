@@ -1,6 +1,10 @@
 # IRMarket — One Market per Pair (Option B) Implementation Plan
 
-> **Status:** **Not started.** Plan only — no implementation code yet.
+> **Status:** **In progress** — code complete on branch `feat/one-market-per-pair`:
+> bot round model + deploy script + web rounds-from-quotes implemented; bot unit tests
+> (`bot/tests/test_rounds.py`) + hardhat suite + web tsc/build + Playwright e2e pass locally.
+> **Remaining:** IRMarket redeploy + `NEXT_PUBLIC_MARKET_ADDRESS`/registry update, and a live
+> `--once` ×2 testnet run (zero `createMarket`) — deliberately deferred.
 > **Branch/worktree:** based on `IRMarket-monoracleA` (`feat/monoracle-upstream`,
 > includes `5baff39` packed-struct + guarded `createMarket`).
 > **Touches:** `contracts/` (redeploy only), `script/deploy-market-stack.js`, `bot/verifier.py`,

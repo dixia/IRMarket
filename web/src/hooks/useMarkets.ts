@@ -3,15 +3,15 @@
 import { useReadContracts } from "wagmi";
 import { useMemo } from "react";
 import { IRMARKET_ABI } from "@/lib/abis/market";
-import { useCurrentBlock } from "./useCurrentBlock";
 import { useTokenMeta } from "./useTokenMeta";
 import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, SELECTED_BASE_TOKENS, hasWrapper } from "@/lib/config";
 import { TOKEN_META_PENDING } from "@/lib/types";
 import type { Market, MarketWithMeta } from "@/lib/types";
 
-/** Markets: factory registry when the wrapper is configured; else empty. */
+/** Markets: factory registry when the wrapper is configured; else empty.
+ *  One-market-per-pair: returns ONE trade-target market per pair (newest marketId);
+ *  trading rounds come from `useRounds` (quote expiryBlock). */
 export function useMarkets(): MarketWithMeta[] {
-  const blockNumber = useCurrentBlock();
   const configuredForWrapper = hasWrapper && MARKET_ADDRESS_RAW !== "";
 
   const { data } = useReadContracts({
@@ -109,17 +109,20 @@ export function useMarkets(): MarketWithMeta[] {
     const set = new Set(SELECTED_BASE_TOKENS);
     return enriched.filter((m) => set.has(m.baseToken.toLowerCase()));
   }, [enriched]);
-  // Sort so markets still in their quote window come first (soonest-expiring first), then
-  // expired ones last. A market is "active" while its expiryBlock is still ahead of now.
-  const sorted = useMemo(() => {
-    if (blockNumber === undefined) return curated;
-    return [...curated].sort((a, b) => {
-      const aActive = a.expiryBlock > blockNumber ? 0 : 1;
-      const bActive = b.expiryBlock > blockNumber ? 0 : 1;
-      if (aActive !== bActive) return aActive - bActive;
-      return a.expiryBlock < b.expiryBlock ? -1 : a.expiryBlock > b.expiryBlock ? 1 : 0;
-    });
-  }, [curated, blockNumber]);
+  // One-market-per-pair (docs/plan/one-market-per-pair-plan.md): markets are the PAIR
+  // TRADE TARGET (openLong needs marketId + feeBps/marketMaker; pair/MM/fee never change),
+  // NOT rounds — trading rounds come from useRounds (quote expiryBlock). Dedup to the
+  // newest market per pair. `markets()` still enumerates every id (the wrapper has no
+  // pair→id lookup) but under Option B nextMarketId freezes at ~#pairs.
+  const deduped = useMemo(() => {
+    const byPair = new Map<string, MarketWithMeta>();
+    for (const m of curated) {
+      const key = `${m.baseToken.toLowerCase()}/${m.quoteToken.toLowerCase()}`;
+      const cur = byPair.get(key);
+      if (!cur || m.marketId > cur.marketId) byPair.set(key, m);
+    }
+    return [...byPair.values()];
+  }, [curated]);
 
-  return sorted;
+  return deduped;
 }

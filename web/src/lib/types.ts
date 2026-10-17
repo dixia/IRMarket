@@ -24,8 +24,16 @@ export interface Market {
   quoteToken: `0x${string}`;
   marketMaker: `0x${string}`;
   feeBps: bigint;
+  /** Advisory/inert under the one-market-per-pair model — rounds come from quotes. */
   expiryBlock: bigint;
   createdAtBlock: bigint;
+}
+
+/** A trading round = a distinct QUOTE expiryBlock for a pair (one-market-per-pair model). */
+export interface Round {
+  expiryBlock: bigint;
+  quotes: Quote[];
+  live: boolean;
 }
 
 export interface Position {

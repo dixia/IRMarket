@@ -211,21 +211,27 @@ NEXT_PUBLIC_EXPIRY_SECONDS=180              # 3-min default round cadence
 ### 4.2 Tradeable quotes & countdown (HTTP polling)
 
 - For a market, track ACTIVE quotes of the pair: `useQuotes` reads a **trailing window** of
-  `quotes()` (`nextQuoteId − 200 … nextQuoteId`), 4s poll; keep only `status == ACTIVE` with
-  `block.number <= expiryBlock` (vetoable). No WS — pure HTTP (see §7.4). The 200-quote cap is
-  a demo sanity bound (bot rolls ~600-block rounds; a couple rounds fit comfortably).
+  `quotes()` (`nextQuoteId − 50 … nextQuoteId`), 4s poll; keep only `status == ACTIVE` with
+  `block.number <= expiryBlock` (vetoable). No WS — pure HTTP (see §7.4). The 50-quote cap is
+  a demo sanity bound (rounds are ~15 min / 3000 blocks).
+- **One-market-per-pair (docs/plan/one-market-per-pair-plan.md):** `useMarkets` dedups to ONE
+  trade-target market per pair (newest `marketId` — the fee/MM holder for `openLong`); trading
+  ROUNDS are derived from QUOTE `expiryBlock`s by `useRounds` / `useMarketGroups`
+  (`group.active.expiryBlock` drives every countdown; the market's own `expiryBlock` is inert).
+  The trade page's round selector (`?r=<expiryBlock>`) lists live rounds (soonest first, labeled
+  with the newest quote id) and past rounds (newest first).
 - **Default tradeable quote = newest ACTIVE quote (Q3-A):** with D-13 the whole round is
   vetoable and the bot restocks, so several ACTIVE quotes may coexist (possibly different
   prices/sizes as the market moves). The UI shows/executes the **newest** one; older ACTIVE
   quotes are not offered by default (arbitrage on stale quotes is intentional, but kept out of
   the default path).
-- **Countdown is market-level** (D-13): the round's `expiryBlock` → block→time conversion off
-  `useCurrentBlock` (300ms blocks). `formatCountdown` renders `Xm Ys` / "Expired" (V0.9.2:
-  English wording — see `ui_copy.md`).
+- **Countdown is round-level** (D-13): the selected round's QUOTE `expiryBlock` → block→time
+  conversion off `useCurrentBlock` (300ms blocks). `formatCountdown` renders `Xm Ys` / "Expired"
+  (V0.9.2: English wording — see `ui_copy.md`).
 - Degraded states:
   - **No tradeable quote:** no ACTIVE quote in window (bot off / collateral rolling, B4) →
     trade panel disabled with that message.
-  - **Market expired / no placement:** after `expiryBlock`, no new vetoes for the round.
+  - **Round expired / no placement:** after the round's `expiryBlock`, no new vetoes for the round.
 
 ### 4.3 Reference price & mid-round marks (B12)
 

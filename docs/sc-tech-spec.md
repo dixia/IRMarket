@@ -119,6 +119,11 @@ struct Market {
   assert they talk to the right wrapper build.
 - **No pair dedup** (D-14): the same underlying may list several option markets with
   different expiries/fees; each round = a new `marketId`.
+  **Update (one-market-per-pair, docs/plan/one-market-per-pair-plan.md):** in the 15-min-round
+  operating model the wrapper keeps **ONE long-lived market per pair**. The market's own
+  `expiryBlock` is inert (`openLong` validates the QUOTE's expiry); trading rounds are defined
+  by the quote's `expiryBlock`. The bot never calls `createMarket` in its loop — the deploy
+  script creates/reuses the single market per pair.
 
 ### 3.2 State variables
 
@@ -299,9 +304,11 @@ arbitrary partial fill; arbitrary sizes would require fractional-veto support (o
    withdraws (`2×` other side) and **re-quotes immediately** (restocking) so a tradeable
    quote is always available.
 3. **Round-scoping is mandatory:** every quote/settle/restock decision must be matched by
-   `quote.expiryBlock == market.expiryBlock` — **never by pair alone**. Mid-round bots manage
-   one round and must not touch an expired round's quotes, and a stale `marketId` must not
-   re-settle the live round's quotes. (This scoping bug crashed the bot once.)
+   the round identity — `quote.expiryBlock` = the current round's expiry — **never by pair
+   alone**. Mid-round bots manage one round and must not touch an expired round's quotes.
+   (This scoping bug crashed the bot once.)
+   **Under the one-market-per-pair model the ROUND is the quote expiry itself; the bot derives
+   it from its quotes and rolls to `block + ROUND_BLOCKS` — it never re-creates a market.**
 4. Un-vetoed quotes settle after expiry: `settleValidQuote` — **in order, oldest first,
    the round's final quote LAST**, so the canonical price = 终价 (D-06, B12).
 5. `withdrawProviderFunds` to recycle collateral (B7/B12) → next round, configurable
@@ -399,13 +406,13 @@ when a quote settles (B12).
 - Continuous `submitQuote(..., expiryBlock)` per active market round → vetoed ⇒ withdraw +
   re-quote; after expiry settle oldest-first, final quote last → `withdrawProviderFunds`
   (FR-BOT-001/002); veto watch for P&L logging (FR-BOT-004).
-- **Round scope:** all quote/settle/restock filtering by `quote.expiryBlock ==
-  market.expiryBlock`, never pair alone (see §5.1). On a stale `marketId` the bot settles the
-  old round and rolls to a fresh market instead of touching the live round.
+- **Round scope:** all quote/settle/restock filtering by the ROUND identity — the quote's
+  `expiryBlock` — never pair alone (see §5.1). **One market per pair:** the bot never rolls a
+  `marketId`; when a round expires it settles it and starts the next at `block + ROUND_BLOCKS`.
 - Receives the 1% wrapper fee (HKD) at `marketMaker` set per market.
 - Created from upstream `bot/verifier.py` (veto side) + `script/demo.js` (quoting side).
-- Round-roll helper: `script/create-market.js` (creates the next market, updates
-  `deployment.json`); the bot can also auto-roll via `AUTO_CREATE_MARKET`.
+- Market creation belongs to `script/deploy-market-stack.js` (one long-lived market per pair,
+  reused-or-created idempotently); `script/create-market.js` survives only as a one-shot ensure.
 
 ### 8.3 Market maker / creator
 

@@ -30,10 +30,12 @@ const E18 = 10n ** 18n;
 // ---------------------------------------------------------------------------
 const BOT_GAS = {
   approve: 60_000n,
-  submit_quote: 400_000n,
+  // Hot path retune (one-market-per-pair): live estimate 276-293k → 340k (~16-23% head-room).
+  submit_quote: 340_000n,
   settle: 100_000n,
   withdraw: 120_000n,
-  create_market: 250_000n,
+  // No longer on the bot's per-round path; one market/pair created by the deploy script.
+  create_market: 300_000n,
 };
 
 // ---------------------------------------------------------------------------

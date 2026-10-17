@@ -5,11 +5,13 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { MarketCard } from "@/components/market/MarketCard";
 import { TradePanel } from "@/components/trade/TradePanel";
 import { useMarkets } from "@/hooks/useMarkets";
+import { useRounds } from "@/hooks/useRounds";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { BlockCountdown } from "@/components/market/BlockCountdown";
 import { formatPrice, formatCountdown } from "@/lib/format";
 import { isFullyConfigured } from "@/lib/config";
+import type { Round } from "@/lib/types";
 
 export default function TradePage() {
   return (
@@ -24,6 +26,9 @@ function TradeContent() {
   const router = useRouter();
   const m = Number(params.get("m") ?? "");
   const side = params.get("side");
+  // Round identity = the QUOTE expiryBlock (one-market-per-pair D1/D2): `r` selects a
+  // quote round, `m` stays the pair's single trade-target market.
+  const r = params.get("r") ? BigInt(params.get("r") as string) : undefined;
   const markets = useMarkets();
 
   const market = useMemo(
@@ -31,9 +36,26 @@ function TradeContent() {
     [markets, m],
   );
 
-  const onMarketChange = (nextMarketId: string) => {
+  const pair = useMemo(
+    () => (market ? { base: market.baseToken, quote: market.quoteToken } : null),
+    [market],
+  );
+  const { rounds } = useRounds(pair);
+
+  // Selected round: the `?r=` expiry when given, else the soonest live round.
+  const selectedRound: Round | undefined = useMemo(() => {
+    if (rounds.length === 0) return undefined;
+    if (r !== undefined) return rounds.find((round) => round.expiryBlock === r);
+    return rounds.find((round) => round.live) ?? rounds[0];
+  }, [rounds, r]);
+
+  const onRoundChange = (nextExpiry: string) => {
     const current = new URLSearchParams(params.toString());
-    current.set("m", nextMarketId);
+    current.set("r", nextExpiry);
+    if (current.get("m") === null || Number.isNaN(Number(m))) {
+      // keep whatever market is currently selected in the URL
+      current.set("m", market ? market.marketId.toString() : "");
+    }
     router.push(`?${current.toString()}`);
   };
 
@@ -51,34 +73,19 @@ function TradeContent() {
 
   const blockNumber = useCurrentBlock();
 
-  // Rounds of the selected market's pair: live soonest-expiring first, past newest first.
-  const pairRounds = useMemo(() => {
-    if (!market) return null;
-    const base = market.baseToken.toLowerCase();
-    const quote = market.quoteToken.toLowerCase();
-    const pair = markets.filter(
-      (r) => r.baseToken.toLowerCase() === base && r.quoteToken.toLowerCase() === quote,
-    );
-    if (blockNumber === undefined) {
-      return { live: [...pair].sort((a, b) => Number(a.marketId) - Number(b.marketId)), past: [] };
-    }
-    const live = pair.filter((r) => r.expiryBlock > blockNumber)
-      .sort((a, b) => (a.expiryBlock < b.expiryBlock ? -1 : 1));
-    const past = pair.filter((r) => r.expiryBlock <= blockNumber)
-      .sort((a, b) => (a.expiryBlock > b.expiryBlock ? -1 : 1));
-    return { live, past };
-  }, [market, markets, blockNumber]);
-
-  const roundLabel = (expiryBlock: bigint): string => {
+  const roundLabel = (expiryBlock: bigint, live: boolean): string => {
     if (blockNumber === undefined) return "";
     const left = expiryBlock - blockNumber;
     if (left <= 0n) return " · expired";
-    return ` · ~${formatCountdown(left)}`;
+    return live ? ` · live ~${formatCountdown(left)}` : "";
   };
 
   if (!market) {
     return <p className="text-sm text-text-dim">Market not found.</p>;
   }
+
+  const liveRounds = rounds.filter((round) => round.live);
+  const pastRounds = rounds.filter((round) => !round.live);
 
   return (
     <div className="space-y-6">
@@ -90,33 +97,38 @@ function TradeContent() {
             <span className="rounded-md bg-card-border/40 px-2 py-0.5 text-xs text-text-dim">
               {market.ticker}
             </span>
-            {pairRounds !== null && pairRounds.live.length + pairRounds.past.length > 1 && (
+            {rounds.length > 1 && (
               <select
                 className="rounded-lg border border-card-border bg-card px-2 py-1 text-xs"
-                value={market.marketId.toString()}
-                onChange={(e) => onMarketChange(e.target.value)}
+                value={(selectedRound?.expiryBlock ?? 0n).toString()}
+                onChange={(e) => onRoundChange(e.target.value)}
                 aria-label="Select round (expiry)"
               >
-                <optgroup label="Live rounds">
-                  {pairRounds.live.map((r) => (
-                    <option key={r.marketId.toString()} value={r.marketId.toString()}>
-                      #{r.marketId.toString()} · live{roundLabel(r.expiryBlock)}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Past rounds">
-                  {pairRounds.past.map((r) => (
-                    <option key={r.marketId.toString()} value={r.marketId.toString()}>
-                      #{r.marketId.toString()} · expired
-                    </option>
-                  ))}
-                </optgroup>
+                {liveRounds.length > 0 && (
+                  <optgroup label="Live rounds">
+                    {liveRounds.map((round) => (
+                      <option key={round.expiryBlock.toString()} value={round.expiryBlock.toString()}>
+                        #{round.quotes[round.quotes.length - 1].quoteId.toString()} · live{roundLabel(round.expiryBlock, true)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {pastRounds.length > 0 && (
+                  <optgroup label="Past rounds">
+                    {pastRounds.map((round) => (
+                      <option key={round.expiryBlock.toString()} value={round.expiryBlock.toString()}>
+                        #{round.quotes[round.quotes.length - 1].quoteId.toString()} · expired
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             )}
           </div>
           <div className="text-right">
             <div className="kicker text-text-dim">Expiry</div>
-            <BlockCountdown expiryBlock={market.expiryBlock} />
+            {/* Round countdown from the QUOTE expiry; the market's own field is inert. */}
+            <BlockCountdown expiryBlock={selectedRound?.expiryBlock ?? market.expiryBlock} />
           </div>
         </div>
 
@@ -144,8 +156,14 @@ function TradeContent() {
         </p>
       )}
 
-      {/* market card snapshot */}
-      <MarketCard market={market} price={price.status === "ok" ? price.price : undefined} />
+      {/* market card snapshot — countdown = the selected round's quote expiry */}
+      <MarketCard
+        market={market}
+        price={price.status === "ok" ? price.price : undefined}
+        roundExpiry={selectedRound?.expiryBlock}
+        expired={!selectedRound?.live}
+        liveRounds={liveRounds.length}
+      />
 
       {/* trade panel */}
       <TradePanel

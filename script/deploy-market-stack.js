@@ -10,7 +10,11 @@
  *   1. IRMarket wrapper (oracle-bound)   — reused ONLY if the existing binding matches
  *   2. HKD quote token (MockERC20)       — reused from deployment-assets.json (NEVER redeployed)
  *   3. base tokens per asset (MockERC20) — reused by symbol from deployment-assets.json
- *   4. markets (one round per asset)     — created fresh every run (rounds are ephemeral)
+ *   4. markets (ONE long-lived market per asset) — reused from the registry if the on-chain
+ *                                          market matches (pair/marketMaker/feeBps); created
+ *                                          only if missing. The market's own expiryBlock is
+ *                                          INERT: rounds are defined by the QUOTE's expiryBlock
+ *                                          (docs/plan/one-market-per-pair-plan.md D1-D3).
  *   5. IRMarketVault                     — MVP ships exactly ONE vault (assets[0]); reused only
  *                                          if its oracle/pair bindings match this run
  *
@@ -23,6 +27,8 @@
  *   $env:PRIVATE_KEY     = "<funded deployer>"          # required for a real run
  *   node script/deploy-market-stack.js [ --dry-run ]    # --dry-run: checks + plan, zero txs
  *   FRESH_TOKENS=1 / --fresh-tokens                     # force-deploy brand-new tokens
+ *   MARKET_MAKER="<addr>"                               # marketMaker for created markets (default: deployer)
+ *   MARKET_EXPIRY_BLOCKS=3000                           # market's (inert) expiryBlock, 15 min @0.3s
  * Writes deployment.json / deployment-assets.json / deployment-vault.json.
  */
 import "dotenv/config";
@@ -39,7 +45,11 @@ const FRESH_TOKENS = process.env.FRESH_TOKENS === "1" || process.argv.includes("
 const RPC_URL = process.env.RPC_URL || "https://testnet-rpc.monad.xyz";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
 const FEE_BPS = BigInt(process.env.FEE_BPS || "100");
-const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
+// The market's own expiryBlock is ADVISORY/INERT (openLong validates the QUOTE's expiryBlock,
+// never the market's), so we park it just past creation (15 min). Rounds = quote expiryBlock.
+const MARKET_EXPIRY_BLOCKS = Number(process.env.MARKET_EXPIRY_BLOCKS || 3000); // 15 min @ 0.3s
+// Fee recipient for created markets (used by createMarket's marketMaker param). Default: deployer.
+const MARKET_MAKER = process.env.MARKET_MAKER || "";
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
@@ -62,7 +72,7 @@ const MINT_BASE = ethers.parseEther("1000000");
 const MINT_QUOTE = ethers.parseEther("10000000");
 const MAX_UINT = ethers.MaxUint256;
 
-const GAS = { mint: 150_000, approve: 100_000, createMarket: 2_000_000, fallbackToken: 2_000_000, fallbackWrapper: 2_500_000, fallbackVault: 3_000_000 };
+const GAS = { mint: 150_000, approve: 100_000, createMarket: 300_000, fallbackToken: 2_000_000, fallbackWrapper: 2_500_000, fallbackVault: 3_000_000 };
 
 function loadArtifact(rel) {
   return JSON.parse(fs.readFileSync(path.join(rootDir, "artifacts", "contracts", rel), "utf8"));
@@ -160,7 +170,7 @@ async function main() {
     const r = bySymbol.get(a.symbol);
     return !FRESH_TOKENS && r?.baseToken ? `${a.symbol} REUSE ${r.baseToken}` : `${a.symbol} deploy new`;
   }).join(", ")}`);
-  console.log("[4/5] markets: create one fresh round per asset");
+  console.log("[4/5] markets: one long-lived market per asset (reuse from registry; create only if missing)");
   console.log("[5/5] vault: exactly ONE (assets[0]) — reuse if bindings match\n");
 
   if (DRY_RUN) {
@@ -241,11 +251,13 @@ async function main() {
   await topUp(quoteC, await quoteC.balanceOf(addr), MINT_QUOTE, "HKD");
   await ensureApproval(quoteC, oracleAddr, "HKD");
 
-  // 3-4) base tokens + rounds
+  // 3-4) base tokens + one long-lived market per asset
   const marketC = new ethers.Contract(market.address, market.abi, wallet);
+  const marketMakerAddr = MARKET_MAKER ? ethers.getAddress(MARKET_MAKER) : addr;
   const startBlock = BigInt(await provider.getBlockNumber());
-  const expiryBlock = startBlock + BigInt(Math.floor(EXPIRY_SECONDS / BLOCK_SECONDS));
-  console.log(`  expiryBlock ${expiryBlock} (~${EXPIRY_SECONDS}s)`);
+  const expiryBlock = startBlock + BigInt(MARKET_EXPIRY_BLOCKS);
+  console.log(`  market expiryBlock ${expiryBlock} (+${MARKET_EXPIRY_BLOCKS} blocks ~${Math.floor(MARKET_EXPIRY_BLOCKS * BLOCK_SECONDS)}s)`);
+  console.log(`  marketMaker ${marketMakerAddr} (fee recipient${marketMakerAddr.toLowerCase() === addr.toLowerCase() ? " = deployer" : ""}; INERT market expiry — rounds = quote expiryBlock)`);
   const assetResults = [];
   for (const asset of assets) {
     console.log(`\n  [${asset.symbol}]`);
@@ -261,13 +273,37 @@ async function main() {
     const baseC = new ethers.Contract(base.address, tokenArtifact.abi, wallet);
     await topUp(baseC, await baseC.balanceOf(addr), MINT_BASE, asset.symbol);
     await ensureApproval(baseC, oracleAddr, asset.symbol);
-    const rc = await call(`createMarket ${asset.symbol}`, marketC, "createMarket",
-      [base.address, quote.address, addr, expiryBlock, FEE_BPS], GAS.createMarket);
-    const log = rc.logs
-      .map((l) => { try { return marketC.interface.parseLog(l); } catch { return null; } })
-      .find((l) => l && l.name === "MarketCreated");
-    const marketId = log ? log.args.marketId.toString() : null;
-    console.log(`  marketId ${marketId ?? "?"}`);
+    // Idempotent market reuse (D5): the registry's marketId points at a market on THIS wrapper
+    // whose (pair, feeBps) still match → keep it; the round model no longer needs new markets.
+    // NOTE: marketMaker is intentionally NOT matched — older registries used the deployer and
+    // the fee recipient is advisory-only for the UI; a fresh market is created only when the
+    // pair/fee no longer fit (or FRESH_TOKENS wiped the registry entry).
+    let marketId = null;
+    let marketReused = false;
+    if (!FRESH_TOKENS && prev?.marketId && Number.isFinite(Number(prev.marketId)) && Number(prev.marketId) > 0) {
+      try {
+        const ex = await marketC.markets(BigInt(prev.marketId));
+        if (
+          ex.baseToken !== ethers.ZeroAddress &&
+          ex.baseToken.toLowerCase() === base.address.toLowerCase() &&
+          ex.quoteToken.toLowerCase() === quote.address.toLowerCase() &&
+          Number(ex.feeBps) === Number(FEE_BPS)
+        ) {
+          marketId = String(prev.marketId);
+          marketReused = true;
+          console.log(`  marketId ${marketId} REUSE (long-lived — no createMarket needed)`);
+        }
+      } catch { /* markets() read failed (old wrapper / bad id) — create fresh */ }
+    }
+    if (!marketReused) {
+      const rc = await call(`createMarket ${asset.symbol}`, marketC, "createMarket",
+        [base.address, quote.address, marketMakerAddr, expiryBlock, FEE_BPS], GAS.createMarket);
+      const log = rc.logs
+        .map((l) => { try { return marketC.interface.parseLog(l); } catch { return null; } })
+        .find((l) => l && l.name === "MarketCreated");
+      marketId = log ? log.args.marketId.toString() : null;
+      console.log(`  marketId ${marketId ?? "?"} (new)`);
+    }
     assetResults.push({
       symbol: asset.symbol,
       baseToken: base.address,

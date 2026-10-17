@@ -1,3 +1,11 @@
+// create-market.js — one-shot helper to (re)create the pair's single long-lived market.
+//
+// UNDER THE ONE-MARKET-PER-PAIR MODEL (docs/plan/one-market-per-pair-plan.md) this script
+// is NO LONGER part of the round loop: rounds = QUOTE expiryBlocks (the bot derives +
+// rolls them), and the market's expiryBlock is inert. Run this only if the pair's market
+// is genuinely missing (e.g. after a wrapper redeploy) — normally
+// `script/deploy-market-stack.js` creates/reuses the one market per asset.
+
 import "dotenv/config";
 import { ethers } from "ethers";
 import fs from "fs";

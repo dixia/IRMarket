@@ -14,14 +14,18 @@ function Meta({ value }: { value: string }) {
 export function MarketCard({
   market,
   price,
+  roundExpiry,
   expired = false,
   liveRounds = 1,
 }: {
   market: MarketWithMeta;
   price: bigint | undefined;
-  /** No round is ahead of the current block — the card links to the latest round and pends the next. */
+  /** Countdown target = the ACTIVE ROUND's QUOTE expiryBlock (one-market-per-pair D1/D2):
+   *  market.expiryBlock is inert, so the caller must pass the round expiry. */
+  roundExpiry?: bigint;
+  /** No live quote round is ahead of the current block — the card links to the trade page and pends the next round. */
   expired?: boolean;
-  /** How many rounds of this asset are live right now; >1 hints more expiries inside the trade page. */
+  /** How many quote rounds of this asset are live right now; >1 hints more expiries inside the trade page. */
   liveRounds?: number;
 }) {
   const href = `/trade?m=${market.marketId.toString()}`;
@@ -52,7 +56,8 @@ export function MarketCard({
           </div>
           <div className="text-right text-xs text-text-dim">
             <div>Expiry</div>
-            <BlockCountdown expiryBlock={market.expiryBlock} />
+            {/* Round countdown from the QUOTE expiry (inert market.expiryBlock is never used). */}
+            <BlockCountdown expiryBlock={roundExpiry ?? market.expiryBlock} />
             {liveRounds > 1 && (
               <div className="mt-0.5 text-[11px] text-primary/80">
                 {liveRounds} live rounds

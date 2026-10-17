@@ -1,17 +1,25 @@
 """IRMarket market-maker & settlement bot (Monad testnet).
 
 Implements bot/prd.md FR-BOT-001..004 on the V0.9 Veto-Market design
-(docs/sc-tech-spec.md §5.1/§8.2):
+(docs/sc-tech-spec.md §5.1/§8.2), under the ONE-MARKET-PER-PAIR model
+(docs/plan/one-market-per-pair-plan.md): a **round is defined by the QUOTE's
+`expiryBlock`**, never by the wrapper market's (that field is inert — `openLong`
+validates only the quote's pair/ACTIVE/expiry). The bot therefore NEVER creates
+markets in its loop:
 
   - Quoting loop (FR-BOT-001): keep one ACTIVE quote per round at the tracked fair
-    price (per-quote expiryBlock = the market's expiryBlock, D-13). Re-quote
-    (restock) immediately whenever our quote is vetoed.
+    price (per-quote expiryBlock = the round expiry). Re-quote (restock)
+    immediately whenever our quote is vetoed.
+  - Round model: the current round is the max live `expiryBlock` among our quotes
+    (falling back to a full-ledger scan to adopt another provider's round); when a
+    round expires we settle it and start the next at `block + ROUND_BLOCKS`. No
+    `createMarket` — the deploy script owns the one long-lived market per pair.
   - Settlement quote (FR-BOT-002): SETTLEMENT_QUOTE_LEAD_BLOCKS before expiry,
     submit one final quote at the current fair price so it settles LAST as the
     round mark (终价, D-06).
   - Auto-settle (FR-BOT-003): after expiry, settle ALL ACTIVE quotes of the pair
-    oldest-first (final quote last = canonical price), then withdraw our funds.
-    Optionally create the next round's market and keep quoting (AUTO_CREATE_MARKET).
+    (any provider) oldest-first (final quote last = canonical price), then
+    withdraw our funds.
   - Veto watch (FR-BOT-004): detect vetoes on our quotes, withdraw the 2x
     other-side return, log provider P&L.
 
@@ -85,10 +93,14 @@ MAX_VERIFICATION_SLOTS = 12000
 # limit can be bumped in production without a code change.
 GAS_DEFAULTS = {
     "approve": 60_000,
-    "submit_quote": 400_000,
+    # Hot path (1-3 sends per pair per round): live estimateGas 276-293k on the
+    # deployed oracle → 340k ≈ 16-23% head-room (was 400k, ~44% over).
+    "submit_quote": 340_000,
     "settle": 100_000,
     "withdraw": 120_000,
-    "create_market": 250_000,
+    # No longer on the bot's hot path (one market per pair, docs/plan/
+    # one-market-per-pair-plan.md); kept for the optional AUTO_CREATE_MARKET ensure.
+    "create_market": 300_000,
 }
 
 
@@ -328,8 +340,13 @@ class MarketMakerBot:
 
         self.market_id = pair.market_id
         self.lead_blocks = int(os.getenv("SETTLEMENT_QUOTE_LEAD_BLOCKS", "2"))
-        self.round_blocks = int(os.getenv("ROUND_BLOCKS", "6000"))  # ~30 min @300ms
-        self.auto_create = os.getenv("AUTO_CREATE_MARKET", "1") == "1"
+        # Round length: 15 min @ 300 ms (docs/plan/one-market-per-pair-plan.md D4).
+        # Rounds are quote-expiry windows, NOT markets.
+        self.round_blocks = int(os.getenv("ROUND_BLOCKS", "3000"))  # 15 min @300ms
+        # OPTIONAL one-shot ensure (default OFF — the deploy script owns the single
+        # long-lived market per pair): if the configured market is missing, create it
+        # once. Must NEVER run per round.
+        self.auto_create = os.getenv("AUTO_CREATE_MARKET", "0") == "1"
         # Demo: re-quote every loop (even with an active quote) so the canonical price
         # keeps moving; off by default (production holds one active quote per round).
         self.requote = os.getenv("REQUOTE_EVERY_LOOP", "0") == "1"
@@ -343,6 +360,12 @@ class MarketMakerBot:
         self._final_submitted = False
         self._withdrawn: set[int] = set()
         self._own_quotes: set[int] = set()
+        # Latest snapshot of OUR quotes for this pair (qid → quote dict), refreshed by
+        # `_rescan_own_quotes()`; the round model + restock/veto decisions read this
+        # cache so a step costs ~one early-stopped scan instead of one call per quote.
+        self._own_cache: dict[int, dict] = {}
+        # Current round = the max live quote expiry we are serving (None = start new).
+        self._round_expiry: Optional[int] = None
 
     @property
     def _nonce(self) -> Optional[int]:
@@ -419,30 +442,90 @@ class MarketMakerBot:
             log.info("approving oracle for %s...", token)
             self._send(tok.functions.approve(self.oracle_addr, 2**256 - 1), GAS["approve"], "approve")
 
+    def _is_pair(self, q: dict) -> bool:
+        return (
+            q["baseToken"].lower() == self.base_token.lower()
+            and q["quoteToken"].lower() == self.quote_token.lower()
+        )
+
     def _rescan_own_quotes(self) -> None:
-        """Index quotes we are the provider of for THIS pair by scanning the quote
-        ledger directly (no get_logs — the public RPC 413s on wide log ranges). The
-        oracle is shared across pairs, so filter by our tokens: each instance keeps
-        its own `_own_quotes` and never acts on another pair's quotes."""
+        """Refresh `_own_cache`: quotes we are the provider of for THIS pair, by
+        scanning the quote ledger directly (no get_logs — the public RPC 413s on
+        wide log ranges). The oracle is shared across pairs, so filter by our
+        tokens; the early-stop keeps the scan cheap: stop after `STRANGER_STOP`
+        consecutive quotes by other providers at the tail of the ledger."""
+        STRANGER_STOP = 20
         next_id = self.oracle.functions.nextQuoteId().call()
         consecutive_strangers = 0
         for qid in range(next_id - 1, 0, -1):
             q = self._quote(qid)
             if q["provider"].lower() == self.address.lower():
                 consecutive_strangers = 0
-                if q["baseToken"].lower() == self.base_token.lower() and q["quoteToken"].lower() == self.quote_token.lower():
+                if self._is_pair(q):
                     self._own_quotes.add(qid)
+                    self._own_cache[qid] = q
             else:
                 consecutive_strangers += 1
-                if consecutive_strangers >= 20:
+                if consecutive_strangers >= STRANGER_STOP:
                     break
 
-    def _active_own_quote(self, round_expiry: int) -> Optional[int]:
-        """Our newest ACTIVE quote for THIS round (expiryBlock == market expiry), if any."""
-        active = None
-        for qid in self._own_quotes:
+    def _sync_round(self, block: int) -> None:
+        """Derive the current round from our cached quotes (cheap path): the max live
+        `expiryBlock` among OUR quotes. When we hold none (startup / just settled),
+        fall back to a full-ledger scan to ADOPT the latest live round of this pair
+        from any provider, instead of starting a parallel round — and only then, if
+        nobody has a live round, leave `None` so the caller starts a fresh one."""
+        latest_own = None
+        for q in self._own_cache.values():
+            if q["expiryBlock"] < block:
+                continue
+            if latest_own is None or q["expiryBlock"] > latest_own:
+                latest_own = q["expiryBlock"]
+        if latest_own is not None:
+            self._set_round(latest_own)
+            return
+        adopted = self._latest_live_round_expiry(block)
+        if adopted is not None:
+            log.info("[%s] adopting live round expiry=%s (other provider)", self.symbol, adopted)
+            self._set_round(adopted)
+            return
+        self._set_round(None)
+
+    def _latest_live_round_expiry(self, block: int) -> Optional[int]:
+        """Max live quote expiry for this pair across ALL providers (full scan; only
+        called when we hold no live quote of our own, so the cost is rare)."""
+        next_id = self.oracle.functions.nextQuoteId().call()
+        latest = None
+        for qid in range(1, next_id):
             q = self._quote(qid)
-            if q["baseToken"].lower() != self.base_token.lower() or q["quoteToken"].lower() != self.quote_token.lower():
+            if not self._is_pair(q) or q["status"] != ACTIVE:
+                continue
+            if q["expiryBlock"] < block:
+                continue
+            if latest is None or q["expiryBlock"] > latest:
+                latest = q["expiryBlock"]
+        return latest
+
+    def _set_round(self, expiry: Optional[int]) -> None:
+        if expiry != self._round_expiry:
+            log.info(
+                "[%s] round -> %s", self.symbol,
+                expiry if expiry is not None else "(none — will start a new one)",
+            )
+            self._round_expiry = expiry
+            self._final_submitted = False
+
+    def _start_round(self, block: int) -> int:
+        expiry = block + self.round_blocks
+        log.info("[%s] NEW ROUND expiry=%s (+%s blocks)", self.symbol, expiry, self.round_blocks)
+        self._set_round(expiry)
+        return expiry
+
+    def _active_own_quote(self, round_expiry: int) -> Optional[int]:
+        """Our newest ACTIVE quote for THIS round (expiryBlock == round expiry), if any."""
+        active = None
+        for qid, q in self._own_cache.items():
+            if not self._is_pair(q):
                 continue
             if q["expiryBlock"] != round_expiry:
                 continue  # belongs to a different round
@@ -506,7 +589,12 @@ class MarketMakerBot:
         for qid in sorted(self._own_quotes):
             if qid in self._withdrawn:
                 continue
-            q = self._quote(qid)
+            q = self._own_cache.get(qid)
+            if q is None:
+                q = self._quote(qid)
+                self._own_cache[qid] = q
+            if not self._is_pair(q):
+                continue
             if q["status"] not in (VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 continue
             base_amt, quote_amt = q["baseAmount"], q["quoteAmount"]
@@ -526,63 +614,87 @@ class MarketMakerBot:
                 self.symbol, qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
             )
 
-    def settle_round(self, round_expiry: int) -> None:
-        """After expiry: settle THIS round's ACTIVE quotes oldest-first; final quote last
-        becomes the canonical 终价 (D-06). Then withdraw our own funds.
-        Quotes are matched by the round's expiryBlock so a stale run never touches the
-        live round's quotes."""
+    def settle_expired_rounds(self, block: int) -> None:
+        """FR-BOT-003, one-market-per-pair model: settle EVERY expired round of this
+        pair in one ledger pass — ALL ACTIVE quotes with `expiryBlock < block`
+        (any provider), oldest quote first so a round's final quote settles LAST and
+        becomes the canonical 终价 (D-06). Then withdraw our own finished quotes.
+
+        Triggered only when one of our own quotes is active-but-expired (i.e. a round
+        rolled over), so the expensive full scan runs ~once per round, not per poll.
+        Quotes are matched strictly by expiryBlock, never by pair alone."""
         next_id = self.oracle.functions.nextQuoteId().call()
-        settled_ids = []
+        expired: dict[int, list[int]] = {}
         for qid in range(1, next_id):
             q = self._quote(qid)
-            if q["baseToken"].lower() != self.base_token.lower() or q["quoteToken"].lower() != self.quote_token.lower():
+            if not self._is_pair(q):
                 continue
-            if q["expiryBlock"] != round_expiry:
-                continue  # belongs to a different round
+            if q["expiryBlock"] >= block:
+                continue  # live round
             if q["status"] == ACTIVE:
+                expired.setdefault(q["expiryBlock"], []).append(qid)
+        settled = 0
+        for expiry in sorted(expired):
+            for qid in expired[expiry]:
                 self._send(self.oracle.functions.settleValidQuote(qid), GAS["settle"], f"settle q{qid}")
-                settled_ids.append(qid)
+                settled += 1
         for qid in sorted(self._own_quotes - self._withdrawn):
-            q = self._quote(qid)
-            if q["expiryBlock"] != round_expiry:
+            q = self._own_cache.get(qid) or self._quote(qid)
+            if q["expiryBlock"] >= block:
                 continue
             if q["status"] in (SETTLED_VALID, VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 self._send(self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}")
                 self._withdrawn.add(qid)
-        price = self.oracle.functions.getLatestPrice(self.base_token, self.quote_token).call()
-        log.info(
-            "[%s] round settled: canonical price=%s (settled %s quotes)",
-            self.symbol, price[0], len(settled_ids),
-        )
-
-    def roll_round(self, current_expiry: int) -> int:
-        """Create the next round's market (bot as marketMaker) and continue quoting."""
-        if not self.auto_create:
-            log.warning(
-                "[%s] round %s expired — AUTO_CREATE_MARKET off, exiting round",
-                self.symbol, self.market_id,
+        if settled:
+            price = self.oracle.functions.getLatestPrice(self.base_token, self.quote_token).call()
+            log.info(
+                "[%s] expired rounds settled: %s quote(s); canonical price=%s",
+                self.symbol, settled, price[0],
             )
-            return self.market_id
+
+    def ensure_market(self) -> None:
+        """OPTIONAL one-shot ensure (AUTO_CREATE_MARKET, default OFF): create the pair's
+        single long-lived market if the configured marketId holds nothing on this
+        wrapper. The deploy script owns market creation in the normal flow
+        (docs/plan/one-market-per-pair-plan.md D5) — this is a self-healing fallback
+        and must never run per round.
+
+        On success the bot records the new marketId in memory so the UI trade target
+        keeps working; the registry file is NOT rewritten (the deployer owns it)."""
+        if not self.auto_create:
+            return
+        exists = False
+        if self.market_id > 0:
+            try:
+                m = self._market()
+                base_t, quote_t = m[0], m[1]
+                exists = base_t != "0x0000000000000000000000000000000000000000" and (
+                    base_t.lower() == self.base_token.lower()
+                    and quote_t.lower() == self.quote_token.lower()
+                )
+            except Exception:
+                exists = False
+        if exists:
+            return
         block = self.w3.eth.block_number
-        new_expiry = block + self.round_blocks
+        expiry_block = block + self.round_blocks
         fee_bps = int(os.getenv("FEE_BPS", "100"))
         receipt = self._send(
             self.market.functions.createMarket(
-                self.base_token, self.quote_token, self.address, new_expiry, fee_bps
+                self.base_token, self.quote_token, self.address, expiry_block, fee_bps
             ),
             GAS["create_market"],
-            "createMarket (next round)",
+            "createMarket (one-shot ensure)",
         )
         mid = self._market_created_id(receipt)
         if mid is None:
             raise RuntimeError("createMarket: MarketCreated event not found")
-        log.warning(
-            "[%s] NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — update web/.env.local NEXT_PUBLIC_DEMO_MARKET_ID=%s",
-            self.symbol, mid, new_expiry, current_expiry, mid,
-        )
         self.market_id = mid
-        self._final_submitted = False
-        return mid
+        log.warning(
+            "[%s] created missing marketId=%s (expiry=%s, one-shot ensure) — "
+            "registry/web env should be updated by the deployer",
+            self.symbol, mid, expiry_block,
+        )
 
     def _market_created_id(self, receipt) -> Optional[int]:
         """Extract the indexed marketId from MarketCreated (topic1), oracle-free."""
@@ -606,19 +718,22 @@ class MarketMakerBot:
         from `run` so the multi-pair driver can advance every pair in turn."""
         self._rescan_own_quotes()
         block = self.w3.eth.block_number
-        market = self._market()
-        base_t, quote_t, _mm, fee_bps, expiry, _created = market
-        if base_t.lower() != self.base_token.lower() or quote_t.lower() != self.quote_token.lower():
-            raise RuntimeError(f"[{self.symbol}] market {self.market_id} pair mismatch")
 
-        log.debug("[%s] block=%s expiry=%s (%s left)", self.symbol, block, expiry, expiry - block)
+        # Settle anything expired FIRST (a round rolled over since last poll): this
+        # clears stale ACTIVE quotes so the round derivation below is clean.
+        own_expired_active = [
+            qid for qid, q in self._own_cache.items()
+            if q["status"] == ACTIVE and q["expiryBlock"] < block
+        ]
+        if own_expired_active:
+            self.settle_expired_rounds(block)
 
-        if block > expiry:
-            # Stale marketId (e.g. after a restart mid/late round): settle the old
-            # round's quotes and roll to a fresh one instead of crashing.
-            self.settle_round(expiry)
-            self.roll_round(expiry)
-            return
+        self._sync_round(block)
+        expiry = self._round_expiry
+        if expiry is None:
+            expiry = self._start_round(block)
+
+        log.debug("[%s] block=%s round expiry=%s (%s left)", self.symbol, block, expiry, expiry - block)
 
         # veto watch + restock
         self.watch_vetoes()
@@ -634,6 +749,7 @@ class MarketMakerBot:
     def run(self, once: bool = False) -> None:
         self._sync_nonce()
         self.ensure_approvals()
+        self.ensure_market()
 
         while True:
             try:
@@ -646,11 +762,13 @@ class MarketMakerBot:
 
 
 def run_all(bots: list[MarketMakerBot], once: bool = False) -> None:
-    """Multi-pair driver: approve once per pair, then advance every pair one step
-    per loop. Sends are serial (blocking receipts) and share the wallet nonce, so
-    pairs cannot race each other. Per-pair failures are logged and retried."""
+    """Multi-pair driver: approve once per pair (and one-shot ensure market), then
+    advance every pair one step per loop. Sends are serial (blocking receipts) and
+    share the wallet nonce, so pairs cannot race each other. Per-pair failures are
+    logged and retried."""
     for b in bots:
         b.ensure_approvals()
+        b.ensure_market()
     while True:
         for b in bots:
             try:

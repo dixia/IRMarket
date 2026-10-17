@@ -1,13 +1,19 @@
 "use client";
 
 import { useMemo } from "react";
-import type { Market, MarketWithMeta } from "@/lib/types";
-import { useCurrentBlock } from "./useCurrentBlock";
+import type { Market, MarketWithMeta, Quote, Round } from "@/lib/types";
 import { useMarkets } from "./useMarkets";
+import { useQuotes } from "./useQuotes";
+import { useCurrentBlock } from "./useCurrentBlock";
 
 /**
- * One entry per asset pair (e.g. NVDA/KD) regardless of how many expiry rounds exist.
+ * One entry per asset pair (e.g. NVDA/KD) regardless of how many trading rounds exist.
  * The Market tab shows a single card per asset instead of every historical round.
+ *
+ * One-market-per-pair model (docs/plan/one-market-per-pair-plan.md): rounds + countdown
+ * come from QUOTE expiryBlocks, not from market.expiryBlock (inert — openLong validates
+ * the quote's expiry). One shared quote batch (all pairs) drives every group, the same
+ * pattern the home page already uses to mark prices.
  */
 export interface MarketGroup {
   baseToken: Market["baseToken"];
@@ -16,72 +22,62 @@ export interface MarketGroup {
   quoteSymbol: string;
   baseDecimals: number;
   quoteDecimals: number;
-  /** All rounds whose expiryBlock is still ahead of the current block, soonest-expiring first. */
-  activeRounds: MarketWithMeta[];
-  /** Soonest-expiring live round — the tradeable one (activeRounds[0]). */
-  active: MarketWithMeta | null;
-  /** Highest-expiryBlock round; the card still needs a target when no round is active. */
-  latest: MarketWithMeta;
-  /** Total rounds ever created for this pair (active + expired). */
-  rounds: number;
+  /** Rounds of this pair, live first (soonest-expiring first), then past (newest first). */
+  rounds: Round[];
+  /** Soonest-expiring live round — the tradeable one (rounds[0] while live). */
+  active: Round | null;
+  /** Highest live expiry; the card still needs a countdown target while rounds await. */
+  latestLive: Round | null;
+  /** The pair's trade target market (fee/MM holder for openLong/openShort). */
+  market: MarketWithMeta | null;
 }
 
-function pickActiveRounds(markets: MarketWithMeta[], blockNumber: bigint | undefined): MarketWithMeta[] {
-  if (blockNumber === undefined) return [];
-  return markets
-    .filter((m) => m.expiryBlock > blockNumber)
-    .sort((a, b) => (a.expiryBlock < b.expiryBlock ? -1 : a.expiryBlock > b.expiryBlock ? 1 : 0));
-}
-
-function pickLatest(markets: MarketWithMeta[]): MarketWithMeta {
-  return markets.reduce((a, b) => (b.expiryBlock > a.expiryBlock ? b : a));
+function roundsForPair(quotes: Quote[], base: string, quote: string, block: bigint | undefined): Round[] {
+  const byExpiry = new Map<string, Quote[]>();
+  for (const q of quotes) {
+    if (q.baseToken.toLowerCase() !== base || q.quoteToken.toLowerCase() !== quote) continue;
+    const key = q.expiryBlock.toString();
+    byExpiry.set(key, [...(byExpiry.get(key) ?? []), q]);
+  }
+  const out: Round[] = [];
+  for (const [expiry, qs] of byExpiry) {
+    out.push({
+      expiryBlock: BigInt(expiry),
+      quotes: [...qs].sort((a, b) => (a.quoteId < b.quoteId ? -1 : 1)),
+      live: block !== undefined && BigInt(expiry) >= block,
+    });
+  }
+  const live = out.filter((r) => r.live).sort((a, b) => (a.expiryBlock < b.expiryBlock ? -1 : 1));
+  const past = out.filter((r) => !r.live).sort((a, b) => (a.expiryBlock > b.expiryBlock ? -1 : 1));
+  return [...live, ...past];
 }
 
 /**
- * Groups the full market list by (baseToken, quoteToken) pair.
- * - `active`: soonest round whose expiryBlock is still ahead of the current block.
- * - `latest`: last round ever created; the display fallback while waiting for the next round.
+ * Groups the deduped pair markets with quote-derived rounds:
+ * - `active`: soonest live quote round (null = waiting for the bot's next round).
+ * - `market`: the pair's trade target (newest wrapper market for that pair).
  */
 export function useMarketGroups(): MarketGroup[] {
   const markets = useMarkets();
+  const { quotes } = useQuotes(null);
   const blockNumber = useCurrentBlock();
 
   return useMemo(() => {
-    const groups = new Map<string, { tokens: MarketGroup["baseToken"][]; markets: MarketWithMeta[] }>();
-    for (const m of markets) {
-      const key = `${m.baseToken.toLowerCase()}/${m.quoteToken.toLowerCase()}`;
-      const entry = groups.get(key) ?? { tokens: [m.baseToken, m.quoteToken], markets: [] };
-      entry.markets.push(m);
-      groups.set(key, entry);
-    }
-
-    const result: MarketGroup[] = [];
-    for (const { tokens, markets: rounds } of groups.values()) {
-      const [baseToken, quoteToken] = tokens;
-      const baseSymbol = rounds[0].baseSymbol;
-      const quoteSymbol = rounds[0].quoteSymbol;
-      const activeRounds = pickActiveRounds(rounds, blockNumber);
-      result.push({
-        baseToken,
-        quoteToken,
-        baseSymbol,
-        quoteSymbol,
-        baseDecimals: rounds[0].baseDecimals,
-        quoteDecimals: rounds[0].quoteDecimals,
-        activeRounds,
-        active: activeRounds[0] ?? null,
-        latest: pickLatest(rounds),
-        rounds: rounds.length,
-      });
-    }
-
-    // Active pairs first (soonest-settling first), then pairs awaiting their next round.
-    return result.sort((a, b) => {
-      const aActive = a.active ? 0 : 1;
-      const bActive = b.active ? 0 : 1;
-      if (aActive !== bActive) return aActive - bActive;
-      if (a.active && b.active) return a.active.expiryBlock < b.active.expiryBlock ? -1 : 1;
-      return a.baseSymbol.localeCompare(b.baseSymbol);
+    return markets.map((m) => {
+      const pairQuotes = roundsForPair(quotes, m.baseToken.toLowerCase(), m.quoteToken.toLowerCase(), blockNumber);
+      const live = pairQuotes.filter((r) => r.live);
+      return {
+        baseToken: m.baseToken,
+        quoteToken: m.quoteToken,
+        baseSymbol: m.baseSymbol,
+        quoteSymbol: m.quoteSymbol,
+        baseDecimals: m.baseDecimals,
+        quoteDecimals: m.quoteDecimals,
+        rounds: pairQuotes,
+        active: live[0] ?? null,
+        latestLive: live.length > 0 ? live[live.length - 1] : null,
+        market: m,
+      };
     });
-  }, [markets, blockNumber]);
+  }, [markets, quotes, blockNumber]);
 }
