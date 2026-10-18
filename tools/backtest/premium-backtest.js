@@ -13,12 +13,22 @@
  *      note underestimates — we still stay ≤ ~1000), and JSON-RPC BATCHING (20
  *      eth_getLogs requests per HTTP POST) is supported → 472 wide requests fit in
  *      ~24 POSTs × 7 in flight ⇒ well under the ~4-min target (cap ~8 min).
- *      Two events per request, decoded + joined off-chain:
+ *      Two events per request, decoded + joined off-chain (DUAL-MODE settle join):
  *        QuoteSubmitted(uint256 indexed, address indexed, address indexed baseToken, ...)
- *          → topic0=0x54…, topic3=baseToken (pair attribution via quoteId!)
+ *          → topic0=0x54…, topic3=baseToken (pair attribution via quoteId!); also carries
+ *            price + expiryBlock for the implicit path.
  *        QuoteSettledValid(uint256 indexed quoteId, uint256 settledPrice) → topic0=0xb65…
- *      A settled price counts as NVDA/HKD only if its quoteId was SUBMITTED with
+ *      A price counts as NVDA/HKD only if its quoteId was SUBMITTED with
  *      baseToken == deployment.json baseToken.
+ *      DUAL-MODE: OLD oracle — a quote settles via an explicit settleValidQuote tx →
+ *      QuoteSettledValid (mark at the settle block, price = settledPrice). NEW oracle
+ *      (lazy settlement) — a quote is canonical once block.number > expiryBlock with NO
+ *      settle tx; getLatestPrice derives it at read time, so a never-checkpointed quote's
+ *      mark = its QuoteSubmitted price at its expiryBlock (= the on-chain settledSlot for
+ *      an implicit settle). When several never-checkpointed quotes share one expiryBlock
+ *      (restock + the final settlement quote) only the highest quoteId is canonical
+ *      (getLatestPrice returns the newest matured valid quote), so implicit marks keep the
+ *      highest id per (baseToken, expiryBlock) — a superseded restock quote drops out.
  *   2. Build NVDA-only price series [(block, WAD→float)], drop same-block repeats
  *      (keep last), dedupe consecutive identical prices.
  *   3. Frame each pair of consecutive NVDA settled points with Δt ≤ 1h as ONE SOLD ATM CALL:
@@ -178,7 +188,7 @@ async function main() {
     console.log(`start=${start} (fallback: head−1,000,000 floored at ${START_HINT_MIN})`);
   }
   console.log(`head=${head}, span=${head - start} blocks (~${(((head - start) * SECS_PER_BLOCK) / 86400).toFixed(1)} days)`);
-  console.log(`two events per request (QuoteSettledValid + QuoteSubmitted) — NVDA attribution via quoteId↔baseToken join; width/req=${CHUNK}, ${BATCH} req/POST, ${CONCURRENCY} POSTs in flight`);
+  console.log(`two events per request (QuoteSettledValid + QuoteSubmitted) — DUAL-MODE settle join (explicit QuoteSettledValid ∪ implicit matured-at-expiryBlock); NVDA attribution via quoteId↔baseToken; width/req=${CHUNK}, ${BATCH} req/POST, ${CONCURRENCY} POSTs in flight`);
 
   // job list: 1000-block requests, gathered into batches of BATCH posts
   const chunks = [];
@@ -231,30 +241,70 @@ async function main() {
   console.log(`getLogs done: ${rawLogs.length} raw events from ${done}/${chunks.length} requests (failed=${failedChunks.length} of ${Math.ceil((head - start + 1) / CHUNK)} total), ${elapsed}s`);
   if (failedChunks.length > 0) console.log(`WARNING: ${failedChunks.length} chunk(s) unrecoverable → small holes possible in the series.`);
 
-  // ---- 2. decode + join submitted↔settled by quoteId ------------------------
-  const submitted = new Map(); // quoteId → { baseToken }
+  // ---- 2. decode + join submitted↔settled by quoteId (DUAL-MODE) ------------
+  // OLD oracle: a quote settles via an explicit settleValidQuote tx → QuoteSettledValid
+  // (mark at the settle block, price = settledPrice). NEW oracle (lazy settlement): a
+  // quote is canonical once block.number > expiryBlock with NO settle tx; getLatestPrice
+  // derives it at read time, so a never-checkpointed quote's mark = its QuoteSubmitted
+  // price at its expiryBlock (= the on-chain settledSlot for an implicit settle). Each
+  // quote takes the EXPLICIT path if a QuoteSettledValid exists, else the IMPLICIT path —
+  // but only for a round that has NO explicit checkpoint: once a round carries a
+  // QuoteSettledValid that quote is the canonical mark, and any never-checkpointed quote
+  // in the same round (a restock, possibly vetoed) is superseded, not canonical. When a
+  // round has no checkpoint at all, its never-checkpointed quotes collapse to the highest
+  // quoteId (getLatestPrice returns the newest matured valid quote = the final settlement
+  // quote).
+  const submitted = new Map(); // quoteId → { base, price (WAD), expiryBlock }
   const duplicates = new Map(); // quoteId → count of conflicts
   for (const lg of rawLogs) {
     if (lg.topics[0] !== T_SUBMITTED) continue;
     const ev = iface.parseLog({ topics: lg.topics, data: lg.data });
     const id = ev.args.quoteId.toString();
     const base = ev.args.baseToken.toLowerCase();
-    if (submitted.has(id) && submitted.get(id) !== base) duplicates.set(id, (duplicates.get(id) || 1) + 1);
-    else submitted.set(id, base);
+    if (submitted.has(id) && submitted.get(id).base !== base) duplicates.set(id, (duplicates.get(id) || 1) + 1);
+    else submitted.set(id, { base, price: BigInt(ev.args.price.toString()), expiryBlock: Number(ev.args.expiryBlock) });
   }
   if (duplicates.size) console.log(`WARNING: ${duplicates.size} quoteId(ies) submitted under MULTIPLE tokens (storage slot reuse) — attribution ambiguous, excluded.`);
-  const marksRaw = [];
+  const settledById = new Map(); // quoteId → { block, wad } — explicit QuoteSettledValid checkpoints
   for (const lg of rawLogs) {
     if (lg.topics[0] !== T_SETTLED) continue;
     const ev = iface.parseLog({ topics: lg.topics, data: lg.data });
-    const id = ev.args.quoteId.toString();
-    const base = submitted.get(id);
-    if (base === undefined) continue; // attribution unknown → excluded
+    settledById.set(ev.args.quoteId.toString(), { block: Number(lg.blockNumber), wad: BigInt(ev.args.settledPrice.toString()) });
+  }
+  // rounds that carry an explicit checkpoint: their canonical mark is that QuoteSettledValid,
+  // so never-checkpointed quotes in the SAME round are superseded/vetoed, not canonical.
+  const explicitRounds = new Set(); // `${base}@${expiryBlock}`
+  for (const [id, sub] of submitted) {
+    if (settledById.has(id)) explicitRounds.add(`${sub.base}@${sub.expiryBlock}`);
+  }
+  // implicit settle: per (baseToken, expiryBlock) with NO explicit checkpoint, the highest
+  // never-checkpointed quoteId is canonical (getLatestPrice returns the newest matured valid quote)
+  const implicitWinner = new Map(); // `${base}@${expiryBlock}` → highest never-checkpointed quoteId
+  for (const [id, sub] of submitted) {
+    if (settledById.has(id)) continue; // explicit path already covers it
+    const key = `${sub.base}@${sub.expiryBlock}`;
+    if (explicitRounds.has(key)) continue; // round already checkpointed → never-checkpointed quotes here are superseded/vetoed
+    const prev = implicitWinner.get(key);
+    if (prev === undefined || BigInt(id) > BigInt(prev)) implicitWinner.set(key, id);
+  }
+  const marksRaw = [];
+  for (const [id, sub] of submitted) {
+    const base = sub.base;
     const pair = base === NVDA_TOKEN.toLowerCase() ? "NVDA" : "other";
-    marksRaw.push({ block: Number(lg.blockNumber), wad: BigInt(ev.args.settledPrice.toString()), quoteId: id, pair });
+    const settled = settledById.get(id);
+    if (settled) {
+      // EXPLICIT checkpoint (old deployment / the bot's optional checkpoint): settle-tx block.
+      marksRaw.push({ block: settled.block, wad: settled.wad, quoteId: id, pair });
+    } else if (sub.expiryBlock < head && implicitWinner.get(`${base}@${sub.expiryBlock}`) === id) {
+      // IMPLICIT settlement (new deployment, never checkpointed): canonical once
+      // block.number > expiryBlock — only once head has passed it (expiryBlock < head).
+      marksRaw.push({ block: sub.expiryBlock, wad: sub.price, quoteId: id, pair, implicit: true });
+    }
+    // else: a superseded (non-canonical) never-checkpointed quote — dropped.
   }
   const other = marksRaw.filter((m) => m.pair !== "NVDA").length;
-  console.log(`attribution: ${marksRaw.length} settled events mapped (NVDA=${marksRaw.length - other}, other-pair=${other}; submitted-known=${submitted.size}${duplicates.size ? `, ambiguous=${duplicates.size}` : ""})`);
+  const nImplicit = marksRaw.filter((m) => m.implicit).length;
+  console.log(`attribution: ${marksRaw.length} marks mapped (explicit=${marksRaw.length - nImplicit} QuoteSettledValid, implicit=${nImplicit} matured-at-expiryBlock; NVDA=${marksRaw.length - other}, other-pair=${other}; submitted-known=${submitted.size}${duplicates.size ? `, ambiguous=${duplicates.size}` : ""})`);
 
   // NVDA series: sort, same-block repeats → keep last, then dedupe consecutive identical prices
   const nvdaRaw = marksRaw.filter((m) => m.pair === "NVDA").sort((a, b) => a.block - b.block);
