@@ -8,12 +8,14 @@ Implements bot/prd.md FR-BOT-001..004 on the V0.9 Veto-Market design
     (restock) immediately whenever our quote is vetoed.
   - Settlement quote (FR-BOT-002): SETTLEMENT_QUOTE_LEAD_BLOCKS before expiry,
     read the fair price once and submit (a) a final TRADING quote (expiry E) and
-    (b) the final SETTLEMENT quote (expiry E + SETTLEMENT_WINDOW_BLOCKS). (b)
-    settles LAST as the round mark (终价, D-06); its wider expiry is what keeps a
-    delayed inclusion from reverting `ExpiryMustBeFuture` (dixia/IRMarket#22).
-  - Auto-settle (FR-BOT-003): inside the settlement window [E, E+G], settle ALL
-    ACTIVE trading quotes of the round oldest-first, once; after E+G settle the
-    settlement quote LAST (= canonical price), then withdraw our funds.
+    (b) the final SETTLEMENT quote (expiry E + SETTLEMENT_WINDOW_BLOCKS). (b) is
+    submitted last, so it is the newest quote and therefore the round mark under
+    lazy settlement (终价, D-06); its wider expiry is what keeps a delayed inclusion
+    from reverting `ExpiryMustBeFuture` (dixia/IRMarket#22).
+  - Auto-settle (FR-BOT-003): inside the settlement window [E, E+G], checkpoint the
+    round's own ACTIVE quotes once (an OPTIONAL checkpoint under lazy settlement —
+    the canonical price is already fixed at read time, order-independent); after
+    E+G checkpoint the settlement quote, then withdraw our funds.
     Optionally create the next round's market and keep quoting (AUTO_CREATE_MARKET).
   - Veto watch (FR-BOT-004): detect vetoes on our quotes, withdraw the 2x
     other-side return, log provider P&L.
@@ -133,7 +135,7 @@ MULTICALL3_ABI = [
 #
 # "live cold" = eth_estimateGas on the real oracle/wrapper (the production path);
 # "mock/first" = the local Hardhat gas test and the first-of-round cold SSTOREs
-# (fresh allowance slot, first settle per pair writing latestValidQuoteId). Adopted =
+# (fresh allowance slot, first settle per pair writing the checkpoint pointer). Adopted =
 # the larger of live x1.05 and first-call x1.05, so both the production cost and
 # test/gas.test.js's 120% headroom tripwire are satisfied. A test run with the bare
 # live values reverted createMarket and one submitQuote out of gas — the tripwire
@@ -889,8 +891,8 @@ class MarketMakerBot:
         Bounded: only `_own_current | _pending_own`. An id is removed the moment its
         withdraw succeeds, so the sweep's size is exactly "what is still owed" and stops
         growing with round history. Also withdraws a SETTLED_VALID id whose withdraw
-        didn't land when it was settled — a pure cleanup, because withdrawing does not
-        touch `latestValidQuoteId`, so it cannot rewind the canonical mark.
+        didn't land when it was settled — a pure cleanup: under lazy settlement the mark
+        is derived from status + block height, so withdrawing cannot un-canonicalize it.
 
         Reads come from the step's snapshot (`_quote_cached`, same-block) instead of a
         per-id `eth_call`: statuses only move forward (ACTIVE -> vetoed/settled ->
@@ -911,8 +913,7 @@ class MarketMakerBot:
             q = self._quote_cached(qid)
             if q["status"] == SETTLED_VALID:
                 # a settle that landed without its withdraw (crash, RPC blip) — a pure
-                # cleanup: withdrawing never touches `latestValidQuoteId`, so this cannot
-                # rewind the canonical mark.
+                # cleanup: withdrawing never changes the read-time canonical mark.
                 self._send(
                     self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}",
                     decision_block=decision_block, decision_ts=decision_ts,
@@ -958,34 +959,43 @@ class MarketMakerBot:
             )
 
     def settle_round(self, round_expiry: int, decision_block: Optional[int] = None) -> None:
-        """After expiry: settle OUR OWN ACTIVE quotes for THIS round, oldest-first — the
-        last one settled is our highest id, so it becomes the canonical mark (D-06/终价).
-        Then withdraw everything still owed.
+        """After expiry: checkpoint OUR OWN quotes for THIS round with settleValidQuote,
+        then withdraw everything still owed.
+
+        Under upstream lazy settlement the canonical price is ALREADY fixed the instant
+        block.number passes expiryBlock — getLatestPrice derives it at read time (walks
+        the pair's list, cap 8, with the settleValidQuote pointer as a floor), with NO
+        settle tx. So the settleValidQuote calls here are an OPTIONAL checkpoint, not the
+        settlement itself: they keep the QuoteSettledValid event stream continuous and
+        refresh the fallback floor, but they neither gate the mark nor — being late — can
+        rewind it. That retires the old oldest-first ordering (we used to settle the
+        highest id last so it became the mark) and the "never settle an older round late"
+        workaround; settle order is now irrelevant to the price.
 
         Bounded two ways:
           * only OUR ids (`_own_current | _pending_own`) — the old `range(1, nextQuoteId)`
             sweep walked the whole LEDGER (~150 ids and growing, since the oracle is
             shared across pairs/processes), which is what made a step take minutes;
           * quoting-match is preserved exactly (expiryBlock == round_expiry), so a stale
-            run still cannot touch the live round's quotes, and an active quote from an
-            older round is NOT settled late (a late settle rewrites
-            `latestValidQuoteId`, i.e. it would rewind the mark) — it is left for whoever
-            settles it permissionlessly, as before.
+            run still cannot touch the live round's quotes (per-round attribution,
+            AGENTS.md). A leftover ACTIVE quote from a different round is simply skipped;
+            there is no ordering hazard to avoid — the mark is already canonical and a
+            late checkpoint cannot rewind it.
 
         The same filter excludes THIS round's final settlement quote (expiry E+G ≠ E),
         and it is never in the id sets either — `settle_settlement_quote` owns it and
-        runs it after this pass, LAST, so it is the canonical mark."""
+        checkpoints it after this pass."""
         settled_ids = []
         if decision_block is None:
             decision_block = self.w3.eth.block_number
         decision_ts = time.time()
+        # sorted only for stable logs/iteration; settle order is irrelevant to the mark now
         for qid in sorted(self._own_current | self._pending_own):
             q = self._quote(qid)  # fresh read: every branch here gates a send
             if q["expiryBlock"] != round_expiry:
-                # belongs to a different round. A still-ACTIVE one is NOT settled late:
-                # any settle rewrites `latestValidQuoteId`, so a late settle would rewind
-                # the new round's canonical mark. It stays for whoever settles it
-                # permissionlessly; watch_vetoes still owns the pending (withdrawable)
+                # belongs to a different round — per-round attribution: settle_round only
+                # handles the round it is called for, so a stale run cannot checkpoint the
+                # live round's quotes. watch_vetoes still owns the pending (withdrawable)
                 # leftovers of older rounds.
                 continue
             if q["status"] == ACTIVE:
@@ -994,10 +1004,12 @@ class MarketMakerBot:
                     decision_block=decision_block, decision_ts=decision_ts,
                 )
                 settled_ids.append(qid)
-                # the settle just made it withdrawable — withdraw in the same pass rather
-                # than re-reading, but keep the id in the sets until BOTH sends succeeded:
-                # if the withdraw tx fails, the next step's own settle_round (id still
-                # stored) runs the elif branch, so no escrow is ever stranded.
+                # the window has passed, so the quote is withdrawable under implicit
+                # settlement (block.number > expiryBlock — the checkpoint is NOT what
+                # unlocks it) — withdraw in the same pass rather than re-reading, but
+                # keep the id in the sets until BOTH sends succeeded: if the withdraw tx
+                # fails, the next step's own settle_round (id still stored) runs the elif
+                # branch, so no escrow is ever stranded.
                 self._send(
                     self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}",
                     decision_block=decision_block, decision_ts=decision_ts,
@@ -1011,16 +1023,18 @@ class MarketMakerBot:
             self._pending_own.discard(qid)
         price = self.oracle.functions.getLatestPrice(self.base_token, self.quote_token).call()
         log.info(
-            "[%s] round settled: canonical price=%s (settled %s of our own quotes)",
+            "[%s] round checkpointed: canonical price=%s (automatic; checkpointed %s own quotes)",
             self.symbol, price[0], len(settled_ids),
         )
 
     def settle_settlement_quote(
         self, round_expiry: int, decision_block: Optional[int] = None
     ) -> None:
-        """Settle THIS round's final settlement quote (expiry E+G) — the sibling of
-        `settle_round`, and it MUST run after it: `latestValidQuoteId` is last-write-
-        wins, so the settlement quote settles LAST and its price is the canonical mark.
+        """Checkpoint THIS round's final settlement quote (expiry E+G) — the sibling of
+        `settle_round`. It still runs after it, but the order is no longer load-bearing:
+        under lazy settlement the mark is derived at read time, and a checkpoint cannot
+        rewind it. The settlement quote is submitted last, so it is the newest quote of
+        the round and the walk returns it once its window passes.
 
         Called only from the finalize phase (head > E+G). Fresh read first — every
         branch gates a send — and a single head read is shared by both sends, exactly
