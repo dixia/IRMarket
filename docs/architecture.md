@@ -167,10 +167,11 @@ sequenceDiagram
     V->>HKD: safeTransferFrom(T, V, D)
     Note over V: fee = 1%; notional N = D − fee;<br/>reserve maxPayout = 2N in pendingPayout<br/>INVARIANT: pendingPayout ≤ balance (never insolvent)
 
-    Note over T,HKD: after expiryBlock (tenor blocks later)
+    Note over T,HKD: after expiryBlock (tenor blocks later) — the mark is canonical<br/>automatically once block.number > expiryBlock (lazy settlement; no settle tx)
 
     T->>V: settlePosition(positionId)   — permissionless, payout → owner
     V->>M: getLatestPrice(...) → settle S
+    Note over V,M: getLatestPrice returns the canonical price at read time (newest<br/>matured valid quote); the bot's settleValidQuote is an OPTIONAL checkpoint, never a gate
     Note over V: pnl = N·(S−S0)/S0 (LONG), mirrored SHORT,<br/>capped to [−N, +N] → payout ∈ [0, 2N]
     V->>HKD: safeTransfer(owner, payout)
     Note over V: payout ≥ premium ⇒ trader profit cuts LP equity;<br/>payout ≤ premium ⇒ trader loss stays in vault = LP profit<br/>NEVER any post-hoc fund collection anywhere

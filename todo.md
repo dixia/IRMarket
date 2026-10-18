@@ -68,6 +68,7 @@ _Tracking convention: this file is only an index — each item references a GH i
 ## Bot: the mark quote reverts on testnet (delivery latency, wide)
 
 - GH: https://github.com/dixia/IRMarket/issues/22
+<<<<<<< HEAD
 - Status: **FIXED (code)** — root cause: the bot's loop period (~42–65 blocks on the ops box, each RPC ~1.5 s) exceeded the 2-block submission window, so the closing-price quote was submitted after its own expiry and reverted; measured inclusion latency is 0–2 blocks, so the network was never the bottleneck. Fix: the round's final quote gets its own expiry `E + SETTLEMENT_WINDOW_BLOCKS` (default 60), a fresh trading quote settles right after `E`, the wrapper gates trading at the market expiry, and the loop polls fast near the bell. Merged to `main`; live-verified on the AWS ops box (0 reverted txs; `dt_send_s` 0.52–0.9 s there vs 1.0–3.3 s locally). Plan: `docs/plan/settlement-quote-timing-plan.md`.
 
 ## Production cutover: wrapper redeploy (trade gate + right-sized gas)
@@ -79,3 +80,8 @@ _Tracking convention: this file is only an index — each item references a GH i
 
 - GH: https://github.com/dixia/IRMarket/issues/29
 - Status: **OPEN** — WS push relay + global store (P0-1), RollingNumber (P0-2), fine-grained selectors (P0-3), theme bootstrap + up/down colors (P0-4); P1 optimistic UI / tiered polling / chunk preload / PWA / i18n; P2 session keys / stream origin / docs SSG / brand visuals. No contract changes; relay is a stateless indexer.
+
+## Monoracle lazy/implicit settlement migration (new oracle; mock + bot + backtest + docs + re-point done)
+
+- GH: https://github.com/dixia/IRMarket/issues/23
+- Status: **OPEN** — mock+tests, bot `settle_round` simplify, backtest dual-mode, docs, ABI refresh, and wrapper/vault re-point to the new oracle `0x0BC3…` done. Remaining (manual ops, tracked separately): ops-server bot redeploy with the new `ORACLE_ADDRESS`/`MARKET_ADDRESS`, Vercel env update + redeploy, production re-point decision.
