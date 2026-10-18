@@ -24,7 +24,16 @@ contract MonoracleMock is IMonoracle {
     }
 
     mapping(uint256 => QuoteData) public quotes_;
+
+    /// @dev pairKey => latest settled valid quote ID. Written only by settleValidQuote,
+    ///      as the getLatestPrice fallback floor once MAX_PRICE_WALK is exhausted.
     mapping(bytes32 => uint256) public latestValidQuoteId_;
+
+    /// @dev pairKey => newest quote id ever submitted for the pair (walk head).
+    mapping(bytes32 => uint256) public latestQuoteId_;
+
+    /// @dev quoteId => previous quote id in the pair's list (0 = list start).
+    mapping(uint256 => uint256) public prevQuoteId_;
 
     // Reentrancy test hook: optional callback during veto
     address public callbackTarget;
@@ -52,6 +61,10 @@ contract MonoracleMock is IMonoracle {
     /// @dev Upstream-consistent window constants (mirror ../monoracle Monoracle.sol).
     uint32 public constant VERIFICATION_SLOTS = 2;
     uint32 public constant MAX_VERIFICATION_SLOTS = 12000;
+
+    /// @dev Max backward steps in getLatestPrice — bounds read gas under hostile
+    ///      shapes (mirror upstream MAX_PRICE_WALK).
+    uint256 public constant MAX_PRICE_WALK = 8;
 
     error ExpiryMustBeFuture();
     error ExpiryTooFar();
@@ -86,6 +99,13 @@ contract MonoracleMock is IMonoracle {
         });
         IERC20(baseToken_).safeTransferFrom(msg.sender, address(this), baseAmount_);
         IERC20(quoteToken_).safeTransferFrom(msg.sender, address(this), quoteAmount_);
+
+        // Lazy settlement: link the quote into the pair's backward list. getLatestPrice
+        // walks it from the head, so the newest submission is always seen first.
+        bytes32 pairKey = _getPairKey(baseToken_, quoteToken_);
+        prevQuoteId_[id] = latestQuoteId_[pairKey];
+        latestQuoteId_[pairKey] = id;
+
         emit QuoteSubmitted(id, msg.sender, baseToken_, quoteToken_, baseAmount_, quoteAmount_, (quoteAmount_ * 10**18) / baseAmount_, uint32(block.number), expiryBlock_);
         return id;
     }
@@ -120,6 +140,14 @@ contract MonoracleMock is IMonoracle {
         emit QuoteVetoedOverpriced(quoteId, msg.sender);
     }
 
+    /**
+     * @notice Optional permissionless checkpoint for a quote that survived the
+     *         verification window. It no longer gates the canonical price:
+     *         getLatestPrice derives the price at read time from the pair's quote
+     *         list. Calling this emits QuoteSettledValid and writes
+     *         latestValidQuoteId_, which serves as the walk's fallback floor once
+     *         MAX_PRICE_WALK steps are exhausted.
+     */
     function settleValidQuote(uint256 quoteId) external {
         QuoteData storage q = quotes_[quoteId];
         if (q.provider == address(0)) revert QuoteDoesNotExist();
@@ -138,7 +166,7 @@ contract MonoracleMock is IMonoracle {
     function withdrawProviderFunds(uint256 quoteId) external {
         QuoteData storage q = quotes_[quoteId];
         if (q.provider != msg.sender) revert NotQuoteProvider();
-        if (q.status == QuoteStatus.ACTIVE) revert VerificationWindowActive();
+        if (q.status == QuoteStatus.ACTIVE && block.number <= q.expiryBlock) revert VerificationWindowActive();
         if (q.status == QuoteStatus.SETTLED_WITHDRAWN) revert NotWithdrawable();
 
         uint256 withdrawBase;
@@ -153,6 +181,12 @@ contract MonoracleMock is IMonoracle {
         } else if (q.status == QuoteStatus.SETTLED_VALID) {
             withdrawBase = q.baseAmount;
             withdrawQuote = q.quoteAmount;
+        } else if (q.status == QuoteStatus.ACTIVE) {
+            // Implicit settlement: the window passed with no checkpoint tx, so the
+            // matured quote pays out like a settled valid one (upstream parity).
+            withdrawBase = q.baseAmount;
+            withdrawQuote = q.quoteAmount;
+            if (q.settledSlot == 0) q.settledSlot = q.expiryBlock; // stable value, not the withdraw block
         } else {
             revert NotWithdrawable();
         }
@@ -169,17 +203,41 @@ contract MonoracleMock is IMonoracle {
         emit FundsWithdrawn(quoteId, q.provider, withdrawBase, withdrawQuote);
     }
 
+    /**
+     * @notice Canonical price read — walks the pair's quote list backward from the
+     *         newest submission, up to MAX_PRICE_WALK steps, and returns the first
+     *         quote that counts as canonical (matured ACTIVE, SETTLED_VALID, or
+     *         SETTLED_WITHDRAWN with settledSlot set). If the cap is exhausted,
+     *         falls back to the settleValidQuote checkpoint pointer when that quote
+     *         is itself canonical.
+     * @dev    Mirrors upstream Monoracle.getLatestPrice (lazy/implicit settlement:
+     *         a quote is canonical once block.number > expiryBlock, no settle tx).
+     *         settledSlot is the checkpoint block for explicitly settled quotes,
+     *         otherwise expiryBlock (the implicit settle point).
+     */
     function getLatestPrice(address baseToken_, address quoteToken_)
         external
         view
         returns (uint256 price, uint32 settledSlot, bool exists)
     {
         bytes32 pairKey = _getPairKey(baseToken_, quoteToken_);
-        uint256 quoteId = latestValidQuoteId_[pairKey];
-        if (quoteId == 0) return (0, 0, false);
+        uint256 quoteId = latestQuoteId_[pairKey];
 
-        QuoteData storage q = quotes_[quoteId];
-        return (q.price, q.settledSlot, true);
+        for (uint256 i = 0; i < MAX_PRICE_WALK && quoteId != 0; ++i) {
+            QuoteData storage q = quotes_[quoteId];
+            if (_isCanonicalCandidate(q)) {
+                return (q.price, q.settledSlot != 0 ? q.settledSlot : q.expiryBlock, true);
+            }
+            quoteId = prevQuoteId_[quoteId];
+        }
+
+        // Checkpoint floor: settleValidQuote's pointer is always a valid past price.
+        quoteId = latestValidQuoteId_[pairKey];
+        if (quoteId != 0 && _isCanonicalCandidate(quotes_[quoteId])) {
+            QuoteData storage q = quotes_[quoteId];
+            return (q.price, q.settledSlot != 0 ? q.settledSlot : q.expiryBlock, true);
+        }
+        return (0, 0, false);
     }
 
     function latestValidQuoteId(bytes32 pairHash) external view returns (uint256) {
@@ -213,5 +271,16 @@ contract MonoracleMock is IMonoracle {
         returns (bytes32)
     {
         return keccak256(abi.encodePacked(baseToken, quoteToken));
+    }
+
+    /// @dev True when a quote's price is canonical without an explicit settle tx
+    ///      (mirror upstream _isCanonicalCandidate). Matured ACTIVE quotes are
+    ///      implicitly settled; VETOED_* are never canonical.
+    function _isCanonicalCandidate(QuoteData storage q) internal view returns (bool) {
+        QuoteStatus s = q.status;
+        if (s == QuoteStatus.ACTIVE) return block.number > uint256(q.expiryBlock);
+        if (s == QuoteStatus.SETTLED_VALID) return true;
+        if (s == QuoteStatus.SETTLED_WITHDRAWN) return q.settledSlot != 0;
+        return false; // VETOED_UNDERPRICED / VETOED_OVERPRICED — never canonical
     }
 }

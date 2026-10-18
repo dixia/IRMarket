@@ -226,6 +226,19 @@
   },
   {
     "inputs": [],
+    "name": "MAX_PRICE_WALK",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_VERIFICATION_SLOTS",
     "outputs": [
       {
@@ -292,6 +305,25 @@
         "type": "bytes32"
       }
     ],
+    "name": "latestQuoteId",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
     "name": "latestValidQuoteId",
     "outputs": [
       {
@@ -306,6 +338,25 @@
   {
     "inputs": [],
     "name": "nextQuoteId",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "prevQuoteId",
     "outputs": [
       {
         "internalType": "uint256",

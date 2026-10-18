@@ -60,6 +60,15 @@ describe("IRMarketVault — MVP LP pool", function () {
     await oracle.settleValidQuote(id);
   }
 
+  // Publish a quote at `priceWad` and mine past its window — NO settleValidQuote.
+  // Under upstream lazy settlement the quote is canonical once block.number >
+  // expiryBlock, so the vault must mark against it without any checkpoint tx.
+  async function setPriceNoSettle(priceWad) {
+    const block = await currentBlock();
+    await oracle.connect(provider).submitQuote(base.target, quote.target, 1n * E18, priceWad, block + 10);
+    await mineBlocks(11);
+  }
+
   // M5 invariant (spec §14): solvency + pendingPayout == Σ open maxPayout, and
   // the vault's token balance always equals its cached `balance`.
   async function assertInvariants() {
@@ -118,6 +127,26 @@ describe("IRMarketVault — MVP LP pool", function () {
       .withArgs(0n, 100n * E18, 99n * E18);
 
     expect(await vault.equity()).to.equal(1001n * E18); // +1 fee
+  });
+
+  it("canonical price needs no settle tx (lazy settlement)", async function () {
+    // Same numbers as "LONG settles at a higher price" above, but the oracle is
+    // never checkpointed: the quotes are canonical by maturation alone.
+    await setPriceNoSettle(100n * E18);
+    await vault.connect(lp).deposit(1000n * E18);
+
+    const before = await quote.balanceOf(trader.address);
+    await expect(vault.connect(trader).openPosition(LONG, 100n * E18, 10n))
+      .to.emit(vault, "PositionOpened");
+
+    await setPriceNoSettle(200n * E18); // price doubles, still no settle tx
+    await expect(vault.connect(trader).settlePosition(0))
+      .to.emit(vault, "PositionSettled")
+      .withArgs(0n, 200n * E18, 198n * E18);
+
+    expect(await quote.balanceOf(trader.address)).to.equal(before + 98n * E18); // +198 payout -100 premium
+    expect(await vault.pendingPayout()).to.equal(0n);
+    expect(await vault.equity()).to.equal(902n * E18); // LP lost 98 net
   });
 
   it("SHORT profits when price falls", async function () {

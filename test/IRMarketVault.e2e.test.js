@@ -3,8 +3,9 @@
  *
  * Unlike `test/IRMarketVault.test.js` (unit / M5 hardening), these tests drive the
  * full real flow through the deployed contracts and the real oracle mechanics:
- * MonoracleMock quote submit → mine past the veto window → settleValidQuote →
- * vault reads the canonical price. The vault boundary is never mocked.
+ * MonoracleMock quote submit → mine past the veto window → the price is canonical
+ * (lazy/implicit settlement; settleValidQuote is only an optional checkpoint) →
+ * vault reads it. The vault boundary is never mocked.
  *
  * Canonical walkthrough + exact numbers mirror `script/vault-demo.js` (see E2E-7).
  * Payoff: `docs/design/lp-pool-tech-spec.md` §4.2; accounting §6; lifecycle §9;
@@ -216,17 +217,28 @@ describe("IRMarketVault — E2E (LP-vault MVP)", function () {
   });
 
   // ------------------------------------------------------------------
-  // 4. Canonical price = last settled quote (B12 integration)
+  // 4. Canonical price = newest quote (B replaces A), settle optional
   // ------------------------------------------------------------------
-  it("E2E-4: canonical price is the last settled quote (B replaces A)", async function () {
+  it("E2E-4: canonical price is the newest quote (B replaces A), no settle needed", async function () {
     await vault.connect(lp1).deposit(1000n * E18);
 
-    await setPrice(100n * E18); // quote A
-    await setPrice(150n * E18); // quote B, replaces A as canonical
+    // A @ 100 and B @ 150 share one window; B is submitted last.
+    const idA = await oracle.nextQuoteId();
+    const block = await currentBlock();
+    await oracle.connect(provider).submitQuote(base.target, quote.target, 1n * E18, 100n * E18, block + 10);
+    await oracle.connect(provider).submitQuote(base.target, quote.target, 1n * E18, 150n * E18, block + 10);
+    await mineBlocks(11); // both windows pass — NO settle tx
 
-    const [price, , exists] = await oracle.getLatestPrice(base.target, quote.target);
+    // Lazy settlement: B is canonical the moment its window passes.
+    const [price, settledSlot, exists] = await oracle.getLatestPrice(base.target, quote.target);
     expect(exists).to.equal(true);
     expect(price).to.equal(150n * E18); // B, not A
+    expect(settledSlot).to.equal(BigInt(block) + 10n); // expiryBlock backfill (D4)
+
+    // A late checkpoint of the OLDER quote must not drag the price back to A.
+    await oracle.connect(deployer).settleValidQuote(idA);
+    const [priceAfterCheckpoint] = await oracle.getLatestPrice(base.target, quote.target);
+    expect(priceAfterCheckpoint).to.equal(150n * E18);
 
     await vault.connect(trader).openPosition(LONG, D, 10n);
     const p = await vault.positions(0);
