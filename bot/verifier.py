@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+from eth_abi import decode
 from web3 import Web3
 
 try:  # script dir on sys.path when run as `python bot/verifier.py`
@@ -81,6 +82,38 @@ MAX_VERIFICATION_SLOTS = 12000
 NEAR_EXPIRY_LOOKBACK_BLOCKS = 65
 NEAR_EXPIRY_LOOKAHEAD_BLOCKS = 3
 NEAR_EXPIRY_POLL_SECONDS = 0.4
+# Multicall3 (n3) `aggregate3` — the minimum the bot needs to batch its per-step
+# reads. Canonical deployment: 0xcA11bde05977b3631167028862bE2a173976CA11 (Monad
+# testnet, same address web/src/lib/wagmi.ts uses).
+MULTICALL3_ABI = [
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"name": "target", "type": "address"},
+                    {"name": "allowFailure", "type": "bool"},
+                    {"name": "callData", "type": "bytes"},
+                ],
+                "name": "calls",
+                "type": "tuple[]",
+            }
+        ],
+        "name": "aggregate3",
+        "outputs": [
+            {
+                "components": [
+                    {"name": "success", "type": "bool"},
+                    {"name": "returnData", "type": "bytes"},
+                ],
+                "name": "returnData",
+                "type": "tuple[]",
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
+
 # Fixed gas limits — Monad bills the gas LIMIT, not gas used (sc-tech-spec §7), so an
 # inflated limit burns MON on every single send. These are measured gasUsed plus
 # head-room, not round numbers pulled out of the air:
@@ -224,6 +257,15 @@ class BotContext:
         self.market = self.w3.eth.contract(
             address=self.market_addr,
             abi=_load_abi("artifacts/contracts/IRMarket.sol/IRMarket.json"),
+        )
+        # Multicall3 (n3) at the canonical address on Monad testnet — the same one
+        # web/src/lib/wagmi.ts points at. Used to batch the per-step reads; when it
+        # is absent (or the call fails) every reader falls back to plain eth_calls.
+        self.multicall3 = self.w3.eth.contract(
+            address=Web3.to_checksum_address(
+                os.getenv("MULTICALL3_ADDRESS", "0xcA11bde05977b3631167028862bE2a173976CA11")
+            ),
+            abi=MULTICALL3_ABI,
         )
 
         self.nonce: Optional[int] = None
@@ -545,6 +587,62 @@ class MarketMakerBot:
             self._read_cache[qid] = self._quote(qid)
         return self._read_cache[qid]
 
+    def _read_snapshot(self) -> Optional[tuple]:
+        """Batch this pair's per-step reads into ONE Multicall3 `aggregate3` call:
+        `markets(marketId)` plus `quotes(qid)` for every tracked own id
+        (`_own_current | _pending_own`). Fills `_read_cache` with the quote structs so
+        `_active_own_quote` and `watch_vetoes` read from the same snapshot instead of
+        one `eth_call` each.
+
+        Why: on the ops box one RPC round-trip costs ~1.5 s and a step made 10+
+        sequential calls, so a single loop iteration spanned ~50 blocks — wider than
+        the whole near-expiry band, which is why the at-lead final quotes kept being
+        submitted after expiry. One batched call + `eth_blockNumber` brings a step to
+        ~2-3 s (~8-10 blocks), inside the band.
+
+        Returns the market tuple, or None when the batch is unavailable (n3 not
+        deployed, RPC error) so the caller falls back to the sequential reads — the
+        bot then behaves exactly as before.
+
+        Snapshot freshness: every value is read at the current block, so a decision
+        taken from it is as fresh as a single `eth_call`; the cache is cleared at the
+        top of each step, so nothing survives across steps. Send-gating readers
+        (`settle_round`, `settle_settlement_quote`) still use fresh `_quote` reads.
+        """
+        ids = sorted(self._own_current | self._pending_own)
+        market_types = [o["type"] for o in self._market_abi()["outputs"]]
+        quote_types = [o["type"] for o in self._quote_abi()["outputs"]]
+        calls = [
+            (self.market_addr, False, self.market.encode_abi("markets", [self.market_id]))
+        ]
+        calls += [
+            (self.oracle_addr, False, self.oracle.encode_abi("quotes", [qid]))
+            for qid in ids
+        ]
+        try:
+            results = self.ctx.multicall3.functions.aggregate3(calls).call()
+        except Exception as e:
+            log.debug("[%s] snapshot batch unavailable (%s) — falling back to reads", self.symbol, e)
+            return None
+        self._read_count += 1  # one RPC call, however many logical reads it carried
+        if len(results) != len(calls) or not results[0][0]:
+            raise RuntimeError("snapshot batch: markets() call failed")
+        market = tuple(decode(market_types, results[0][1]))
+        for i, qid in enumerate(ids, start=1):
+            success, data = results[i]
+            if not success:
+                continue  # id not in the ledger — a plain miss, not a batch failure
+            self._read_cache[qid] = dict(zip(self._QUOTE_FIELDS, decode(quote_types, data)))
+        return market
+
+    def _market_abi(self) -> dict:
+        """ABI element of the wrapper's `markets(uint256)` getter."""
+        return self.market.get_function_by_name("markets").abi
+
+    def _quote_abi(self) -> dict:
+        """ABI element of the oracle's `quotes(uint256)` getter (10 flat outputs)."""
+        return self.oracle.get_function_by_name("quotes").abi
+
     # ---------------------------------------------------------------- actions
 
     def ensure_approvals(self) -> None:
@@ -745,11 +843,17 @@ class MarketMakerBot:
         withdraw succeeds, so the sweep's size is exactly "what is still owed" and stops
         growing with round history. Also withdraws a SETTLED_VALID id whose withdraw
         didn't land when it was settled — a pure cleanup, because withdrawing does not
-        touch `latestValidQuoteId`, so it cannot rewind the canonical mark."""
+        touch `latestValidQuoteId`, so it cannot rewind the canonical mark.
+
+        Reads come from the step's snapshot (`_quote_cached`, same-block) instead of a
+        per-id `eth_call`: statuses only move forward (ACTIVE -> vetoed/settled ->
+        withdrawn) and only we can withdraw, so a same-block snapshot can at worst make
+        us miss an action this step, never perform a wrong one — the next step catches
+        it. On the fallback path (no batch) `_quote_cached` simply reads each id."""
         decision_block = self.w3.eth.block_number  # single head read for every send below
         decision_ts = time.time()
         for qid in sorted(self._own_current | self._pending_own):
-            q = self._quote(qid)  # fresh read: this gates a send
+            q = self._quote_cached(qid)
             if q["status"] == SETTLED_VALID:
                 # a settle that landed without its withdraw (crash, RPC blip) — a pure
                 # cleanup: withdrawing never touches `latestValidQuoteId`, so this cannot
@@ -990,7 +1094,11 @@ class MarketMakerBot:
         exactly once per process, on the first step."""
         self._read_cache.clear()
         self._read_count = 0
-        market = self._market()
+        snapshot = self._read_snapshot()
+        if snapshot is None:  # batch unavailable — sequential reads, as before
+            market = self._market()
+        else:
+            market = snapshot
         base_t, quote_t, _mm, fee_bps, expiry, _created = market
         if base_t.lower() != self.base_token.lower() or quote_t.lower() != self.quote_token.lower():
             raise RuntimeError(f"[{self.symbol}] market {self.market_id} pair mismatch")
@@ -1058,7 +1166,10 @@ class MarketMakerBot:
                 self.submit_quote(expiry, "restock quote")
 
         log.debug(
-            "[%s] step: %s quote reads", self.symbol, self._read_count,
+            "[%s] step: %s RPC reads%s | tracked %s current + %s pending",
+            self.symbol, self._read_count,
+            " (batched)" if snapshot is not None else "",
+            len(self._own_current), len(self._pending_own),
         )
 
     def _near_expiry(self) -> bool:

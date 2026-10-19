@@ -1,9 +1,11 @@
 # Final settlement quote timing — implementation plan
 
 > **Status:** In progress — Change A (bot) + Change B (wrapper gate) implemented on
-> `stage/settlement-quote-timing`, live-verified on the AWS server (0 reverted txs;
-> `dt_send_s` 0.52–0.9 s from AWS vs 1.0–3.3 s local). §7.2 (upstream automatic
-> settlement) pending as its own migration.
+> `stage/settlement-quote-timing` and merged to `main`/`feat/real-price-feed`;
+> live-verified on the AWS server (0 reverted txs; `dt_send_s` 0.52–0.9 s from AWS
+> vs 1.0–3.3 s local). §6 adds the Multicall3 per-step batching (measured 8.8×
+> faster steps) that makes the at-lead submission reachable. §7.2 (upstream
+> automatic settlement) pending as its own migration.
 > **Issue:** dixia/IRMarket#22 (final settlement quote reverts on testnet)
 > **Branch order:** `stage/testnet-gas` first, port to `feat/real-price-feed` after verification.
 > **Owner:** bot/ + contracts/. No upstream (Monoracle) change is required for the fix itself;
@@ -121,14 +123,61 @@ Why this satisfies the freshness requirement (< 1 s):
    already excludes it; add a sibling `settle_settlement_quote()`.
 
 5. **Adaptive loop period** (in `run` / `run_all`): when any pair is within
-   `E - 10 <= head <= E + 3`, sleep ~0.4 s instead of `QUOTE_INTERVAL_SECONDS` (5 s).
-   Without this, a 5 s loop cannot place the read inside a 3-block window
-   (~15% chance); with it, the read lands within ~1 block of the intended point.
+   `E - LOOKBACK <= head <= E + 3`, sleep ~0.4 s instead of `QUOTE_INTERVAL_SECONDS`
+   (5 s). `NEAR_EXPIRY_LOOKBACK_BLOCKS` is **65**, not a small constant: it must
+   exceed one full loop period in blocks, or the bot steps straight over the band.
+   Measured on the ops box a loop period is 42–65 blocks (each RPC ~1.5 s, several
+   calls per step) — see §6 for the batching that shortens it.
 
 6. **Already shipped on this branch (keep):** bounded own-quote bookkeeping
    (`82af95e`), revert-nonce advance in `_send`, and the `[latency]` instrumentation
    (`decision_block`, `decision_ts`, `dt_send_s`, `incl_gap_blocks`,
    `post_send_gap_blocks`, `wait_s` at DEBUG) used for verification (§9).
+
+### 4b. Per-step read batching (Multicall3) — added after live verification
+
+Live runs on the AWS box showed the settlement-window fix working (0 reverts,
+canonical handed over by the settlement quote) but the **at-lead path never
+firing**: the final settlement quote was still submitted *after* `E`, so the
+round's price was read seconds past the bell instead of ~0.9 s before it.
+
+Cause — not the band width, the **cost of one `step()`**:
+
+| quantity | measured (AWS → paid QuickNode) |
+|---|---|
+| one `eth_call` | ~1.5 s |
+| RPC calls per `step()` | 3–10+ (`_market`, `block_number`, `_quote` × tracked ids) |
+| wall-clock per `step()` | ~10–15 s ≈ **35–50 blocks** |
+
+The near-expiry band is 68 blocks, but one step already spanned most of it, so the
+bot could not observe `E - lead`. Widening the band cannot fix that.
+
+Fix (`7213e9b`): `_read_snapshot()` folds `markets(marketId)` +
+`quotes(qid)` for every tracked own id (`_own_current | _pending_own`) into **one**
+Multicall3 `aggregate3` call and fills `_read_cache`, so `_active_own_quote` and
+`watch_vetoes` read the snapshot instead of one `eth_call` each. n3 is the
+canonical Monad deployment `web/src/lib/wagmi.ts` already uses
+(`0xcA11bde05977b3631167028862bE2a173976CA11`, overridable via
+`MULTICALL3_ADDRESS`).
+
+Measured on the live stack: **3 calls / 10.35 s → 1 call / 1.18 s (8.8×)**, i.e. a
+step of ~20 blocks — comfortably inside the band, so the at-lead path is reachable.
+
+Correctness:
+- The snapshot is read at the current block, so a decision taken from it is as
+  fresh as a single `eth_call`; `_read_cache` is cleared at the top of every step,
+  so nothing survives across steps.
+- Send-gating readers (`settle_round`, `settle_settlement_quote`,
+  `_resolve_own_quote`) keep their fresh single reads.
+- `watch_vetoes` now reads from the snapshot: quote statuses only move forward
+  (ACTIVE → vetoed/settled → withdrawn) and only we can withdraw, so a same-block
+  snapshot can at worst make us miss an action for one step, never perform a wrong
+  one.
+- If n3 is absent or the call fails, `_read_snapshot()` returns `None` and `step()`
+  falls back to the sequential reads — behaviour identical to before.
+- web3 v7 note: use `encode_abi(name, args)` + `eth_abi.decode`, not
+  `encodeABI`/`decode_function_result` (renamed in v7); `quotes()` returns ten
+  **flat** outputs, matching `_QUOTE_FIELDS`.
 
 ## 5. Change B — IRMarket wrapper (1 check + 1 error)
 
@@ -263,8 +312,25 @@ the run. Only keep the balance from reaching ~0.
    - settlement quote receipt block ≤ `E + G`;
    - canonical price updates within ~1 block after `E` (final trading quote), and is
      the settlement quote's price after `E + G` (same value);
-   - `step: N quote reads` in the single digits.
+   - `step: N RPC reads (batched)` — **N = 1–2**, not the 3–10 of the unbached path.
 3. Hardhat: `npx hardhat test` (55 baseline + the new gate test). Bot: import check.
+
+### Done so far (live, AWS ops box)
+
+| check | result |
+|---|---|
+| reverted txs across 5 + 2 observed rounds | **0** |
+| `post_send_gap_blocks` (broadcast → inclusion) | −1…1 |
+| `dt_send_s` from AWS | **0.52–0.9 s** (vs 1.0–3.3 s from a laptop) |
+| canonical handover | E-quote settles first, settlement quote settles last → canonical becomes the settlement quote's price |
+| late-submit recovery path | exercised live (submitted at ~E+21, included inside the window) |
+| per-step cost after Multicall3 batching | **1 call / 1.18 s** vs 3 calls / 10.35 s (8.8×) |
+| `step: N RPC reads` | 1 (batched) |
+
+Still to confirm on the box: the at-lead label appearing as
+`label='final settlement quote'` (no `(late)` suffix) now that a step fits inside
+the near-expiry band — that is the freshness claim of §3, and it needs one full
+round observed after the batching deploy.
 
 ## 10. Gas budget per round (at 102 gwei, measured)
 
