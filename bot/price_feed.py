@@ -183,9 +183,6 @@ class SyntheticWalkSource(PriceSource):
         jitter = _env_int("PRICE_JITTER_BPS", 300) if jitter_bps is None else int(jitter_bps)
         self.jitter = jitter / 10_000
 
-    def fetch(self, _block: int) -> int:  # pragma: no cover - overridden by get()
-        return self.get(_block)
-
     def get(self, _block: int) -> int:
         if self.jitter > 0:
             self.current = int(self.current * (1 + random.uniform(-self.jitter, self.jitter)))
@@ -217,7 +214,17 @@ class NasdaqSource(PriceSource):
         headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json"}
         raw = _http_get(url, headers)
         data = json.loads(raw.decode("utf-8", "replace"))
-        price = _clean_number(data["data"]["primaryData"]["lastSalePrice"])
+        primary = data["data"]["primaryData"]
+        price = _clean_number(primary["lastSalePrice"])
+        # Market-status context (spec §5.3): outside trading hours the last sale is
+        # a valid frozen mark, but a frozen price must be distinguishable from a
+        # stuck feed when explaining a demo — log it at DEBUG, with the trade time.
+        status = (primary.get("marketStatus") or "").strip()
+        if status and status.lower() != "open":
+            log.debug(
+                "nasdaq %s: market %s, last sale %s (%s)",
+                self.symbol, status, primary.get("lastSalePrice"), primary.get("lastTradeTimestamp"),
+            )
         return _to_wad(price, self.fx)
 
 
@@ -411,7 +418,7 @@ class CachedSource(PriceSource):
         ttl_seconds=None,
         max_staleness_seconds=None,
         seed_wad=0,
-        log=None,
+        logger=None,
         outage_policy=None,
     ):
         self.inner = inner
@@ -421,7 +428,7 @@ class CachedSource(PriceSource):
         self._value = None
         self._at = 0.0  # last SUCCESSFUL fetch (drives freshness/staleness)
         self._last_attempt_at = 0.0  # last fetch ATTEMPT (drives retry throttling)
-        self._log = log or globals()["log"]
+        self._log = logger or globals()["log"]
         policy = outage_policy if outage_policy is not None else os.getenv(
             "PRICE_FEED_OUTAGE_POLICY", "halt"
         )
@@ -509,7 +516,7 @@ def _hk_fx(pair) -> float:
     return 1.0 if fx is None else float(fx)
 
 
-def build_feed(pair, log=None):
+def build_feed(pair, logger=None):
     """Build a price source for ``pair``.
 
     ``pair`` may be a ``PairConfig`` (or any object with the same attributes):
@@ -520,7 +527,7 @@ def build_feed(pair, log=None):
     ``PRICE_FEED_ENABLED != "1"`` (or a synthetic/blank source) yields the legacy
     :class:`SyntheticWalkSource`; unknown sources also fall back to synthetic.
     """
-    logger = log or globals()["log"]
+    logger = logger or globals()["log"]
     fair = int(getattr(pair, "fair_price", 0) or 0)
 
     def synthetic():
@@ -575,4 +582,4 @@ def build_feed(pair, log=None):
         logger.warning("unknown price source %r — using synthetic", source)
         return synthetic()
 
-    return CachedSource(inner, seed_wad=fair, log=logger)
+    return CachedSource(inner, seed_wad=fair, logger=logger)

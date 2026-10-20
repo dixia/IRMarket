@@ -386,7 +386,7 @@ class MarketMakerBot:
         self.symbol = pair.symbol
         self.base_token = Web3.to_checksum_address(pair.base_token)
         self.quote_token = Web3.to_checksum_address(pair.quote_token)
-        self.feed = build_feed(pair, log=log)
+        self.feed = build_feed(pair, logger=log)
         self.expiry_hint = pair.expiry_block
 
         self.market_id = pair.market_id
@@ -736,7 +736,7 @@ class MarketMakerBot:
         label: str,
         fair: Optional[int] = None,
         track_own: bool = True,
-    ) -> int:
+    ) -> Optional[int]:
         """Submit one collateralized quote.
 
         `fair` lets a caller price several quotes from ONE feed read: the final trading

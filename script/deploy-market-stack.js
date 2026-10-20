@@ -62,7 +62,8 @@ const FEED_DESCRIPTORS = {
   GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
   DEEPSEEK: { priceSource: "synthetic" },
   // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless
-  // priceSymbol pins one with `@region`, e.g. B300@us-central1). Opt-in via
+  // priceSymbol pins one with `@region` — not exercised by any default entry;
+  // set e.g. priceSymbol: "B300@us-central1" to pin). Opt-in via
   // ASSETS=B300:<fair> — no token/market exists for these by default.
   B300: { priceSource: "nebius", priceSymbol: "B300", assetClass: "gpu" },
   B200: { priceSource: "nebius", priceSymbol: "B200", assetClass: "gpu" },

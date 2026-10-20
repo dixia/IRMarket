@@ -94,6 +94,32 @@ class NasdaqSourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._feed("").fetch(0)
 
+    def test_closed_market_logs_status_and_trade_time_at_debug(self):
+        body = json.dumps(
+            {
+                "data": {
+                    "primaryData": {
+                        "lastSalePrice": "$514.71",
+                        "marketStatus": "Closed",
+                        "lastTradeTimestamp": "Oct 20, 2026 4:00 PM",
+                    }
+                }
+            }
+        ).encode("utf-8")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        with self.assertLogs("irmarket-bot.price-feed", level="DEBUG") as logs:
+            self.assertEqual(price_feed.NasdaqSource("SOXX", "etf").fetch(0), 514710000000000000000)
+        self.assertIn("Closed", "\n".join(logs.output))
+        self.assertIn("Oct 20, 2026", "\n".join(logs.output))
+
+    def test_open_market_logs_nothing(self):
+        body = json.dumps(
+            {"data": {"primaryData": {"lastSalePrice": "$514.71", "marketStatus": "Open"}}}
+        ).encode("utf-8")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        with self.assertNoLogs("irmarket-bot.price-feed", level="DEBUG"):
+            self.assertEqual(price_feed.NasdaqSource("SOXX", "etf").fetch(0), 514710000000000000000)
+
 
 # --------------------------------------------------------------------------- Yahoo
 
@@ -424,6 +450,13 @@ class SyntheticWalkSourceTests(unittest.TestCase):
 
     def test_pricefeed_alias(self):
         self.assertIs(price_feed.PriceFeed, price_feed.SyntheticWalkSource)
+
+    def test_does_not_override_fetch(self):
+        # The old `fetch` called `self.get`, an infinite-recursion trap if anyone
+        # ever "unifies" get with the base _guard(self.fetch(...)) pattern.
+        self.assertIs(
+            price_feed.SyntheticWalkSource.fetch, price_feed.PriceSource.fetch
+        )
 
 
 # --------------------------------------------------------------------- build_feed

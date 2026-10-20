@@ -173,12 +173,12 @@ class PriceSource(Protocol):
 Factory:
 
 ```python
-def build_feed(pair: PairConfig, log: Optional[logging.Logger] = None) -> PriceSource:
+def build_feed(pair: PairConfig, logger: Optional[logging.Logger] = None) -> PriceSource:
     # PRICE_FEED_ENABLED != "1" (or synthetic/unknown/missing-symbol source) → synthetic
     ...
 ```
 
-`MarketMakerBot.__init__` changes one line to `self.feed = build_feed(pair, log=log)`; the main
+`MarketMakerBot.__init__` changes one line to `self.feed = build_feed(pair, logger=log)`; the main
 loop keeps calling `self.feed.get(block)`. **No other bot changes required** — except the
 outage policy below (quote refusal).
 
