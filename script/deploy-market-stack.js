@@ -61,6 +61,14 @@ const FEED_DESCRIPTORS = {
   SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
   GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
   DEEPSEEK: { priceSource: "synthetic" },
+  // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless
+  // priceSymbol pins one with `@region`, e.g. B300@us-central1). Opt-in via
+  // ASSETS=B300:<fair> — no token/market exists for these by default.
+  B300: { priceSource: "nebius", priceSymbol: "B300", assetClass: "gpu" },
+  B200: { priceSource: "nebius", priceSymbol: "B200", assetClass: "gpu" },
+  H200: { priceSource: "nebius", priceSymbol: "H200", assetClass: "gpu" },
+  H100: { priceSource: "nebius", priceSymbol: "H100", assetClass: "gpu" },
+  "RTX PRO 6000": { priceSource: "nebius", priceSymbol: "RTX PRO 6000", assetClass: "gpu" },
 };
 const feedDescriptor = (symbol) => FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
 

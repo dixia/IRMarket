@@ -159,6 +159,11 @@ class PriceSource(Protocol):
 - `SyntheticWalkSource(fair_price, jitter_bps)` — factor the current `PriceFeed` body out;
   keeps the ±20%-of-static-base clamp. **Synthetic only.**
 - `NasdaqSource(symbol, asset_class)` — `GET …/info`, parse `lastSalePrice`.
+- `NebiusSource(symbol[, @region])` — Nebius spot (preemptible) GPU prices from
+  the unauthenticated API behind `nebius.com/spot-prices` (issue #28):
+  `GET https://api.nebius.cloud/billing/v1alpha1/spot-price` → `items[]`, match
+  `productTitle` by GPU model (`B300`, `H200`, `RTX PRO 6000`, …), USD per
+  GPU-hour; unpinned = lowest across regions, `@region` pins one.
 - `SinaHKSource(code)` — `GET https://hq.sinajs.cn/list=hk{code}`, parse field 6 (last).
 - `TencentHKSource(code)` — `GET https://qt.gtimg.cn/q=hk{code}`, parse field 3 (last).
 - `FallbackSource([s1, s2, …])` — try each; first success wins.
@@ -212,7 +217,9 @@ request ─▶ CachedSource
   (frozen) mark; log at DEBUG + record `lastTradeTimestamp` so the demo can explain a
   non-moving price.
 - Fallback chain per asset: equities `nasdaq → yahoo → last-good → halt`; HK
-  `sina → tencent → last-good → halt`; under `seed` policy the chain ends at the seed.
+  `sina → tencent → last-good → halt`; GPU spot `nebius → last-good → halt`
+  (single endpoint — no secondary source); under `seed` policy the chain ends at
+  the seed.
 
 ### 5.4 FX (quote unit)
 
@@ -270,6 +277,7 @@ Existing entries gain two fields (`priceSource`, `priceSymbol`; `assetClass` def
 | `PRICE_FEED_FALLBACK` | `1` | enable secondary source (yahoo / tencent) |
 | `NASDAQ_API_BASE` | `https://api.nasdaq.com/api/quote` | override/testing |
 | `YAHOO_API_BASE` | `https://query1.finance.yahoo.com` | override/testing |
+| `NEBIUS_API_BASE` | `https://api.nebius.cloud/billing/v1alpha1/spot-price` | override/testing (GPU spot, §5.1) |
 | `SINA_API_BASE` | `https://hq.sinajs.cn` | override/testing |
 | `TENCENT_API_BASE` | `https://qt.gtimg.cn` | override/testing |
 | `PRICE_MAX_JUMP_BPS` | `5000` | warn-only jump threshold |
@@ -281,7 +289,7 @@ Existing entries gain two fields (`priceSource`, `priceSymbol`; `assetClass` def
 
 | file | change |
 |---|---|
-| `bot/price_feed.py` | NEW, stdlib-only module: `PriceSource`/`SyntheticWalkSource`/`NasdaqSource`/`YahooSource`/`SinaHKSource`/`TencentHKSource`/`FallbackSource`/`CachedSource`/`build_feed` |
+| `bot/price_feed.py` | NEW, stdlib-only module: `PriceSource`/`SyntheticWalkSource`/`NasdaqSource`/`YahooSource`/`NebiusSource`/`SinaHKSource`/`TencentHKSource`/`FallbackSource`/`CachedSource`/`build_feed` |
 | `bot/verifier.py` | `PairConfig` gains `price_source`/`price_symbol`/`asset_class`/`fx_quote_per_usd`; `load_asset_configs` reads them; `__init__` builds the real feed via `build_feed(pair)`; keep `get(block)` |
 | `deployment-assets.json` | add `SOXX` entry; add `priceSource`/`priceSymbol` to NVDA/GLM/SNDK/DEEPSEEK (gitignored — regenerate) |
 | `script/deploy-market-stack.js` | add `SOXX` to default `ASSETS` (`NVDA:…,GLM:…,SNDK:…,DEEPSEEK:…,SOXX:…`); pass through per-asset `priceSource` when writing the registry (or write from a sibling map) |
@@ -333,6 +341,9 @@ timeout-bounded (≈5 s) and wrapped so an exception can never bubble into `step
 **Unit (new `bot/tests/`, no chain):**
 - [x] `NasdaqSource` parses `"$514.71"` → `514710000000000000000` WAD; `"$1,394.83"` →
       `1394830000000000000000`; rejects `"N/A"`/`""`.
+- [x] `NebiusSource` (issue #28): lowest spot across regions for a GPU model
+      (`B300` → 6.70 USD/GPU-hour live); `@region` pin (`B300@us-north1` → 8.29);
+      unknown GPU/region and empty `items` raise; `fx` applied.
 - [x] `SinaHKSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6;
       `TencentHKSource` parses `v_hk02513="…~02513~518.000~…"` → field 3.
 - [x] GBK company-name bytes decode without raising (`errors="replace"`).

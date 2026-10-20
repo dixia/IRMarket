@@ -10,6 +10,8 @@ Design (see ``docs/design/bot-real-price-feed-spec.md`` §5):
     seed). The ONLY source that clamps.
   * ``NasdaqSource`` / ``YahooSource`` — US equities/ETF (Nasdaq primary, Yahoo
     backdrop).
+  * ``NebiusSource`` — Nebius spot (preemptible) GPU prices, USD per GPU-hour,
+    from the unauthenticated API behind nebius.com/spot-prices.
   * ``SinaHKSource`` / ``TencentHKSource`` — HK (Sina primary, Tencent fallback);
     natively HKD.
   * ``FallbackSource`` — try sources in order, first success wins.
@@ -47,6 +49,7 @@ _BROWSER_UA = (
 
 _DEFAULT_NASDAQ_BASE = "https://api.nasdaq.com/api/quote"
 _DEFAULT_YAHOO_BASE = "https://query1.finance.yahoo.com"
+_DEFAULT_NEBIUS_BASE = "https://api.nebius.cloud/billing/v1alpha1/spot-price"
 _DEFAULT_SINA_BASE = "https://hq.sinajs.cn"
 _DEFAULT_TENCENT_BASE = "https://qt.gtimg.cn"
 
@@ -235,6 +238,58 @@ class YahooSource(PriceSource):
         data = json.loads(raw.decode("utf-8", "replace"))
         price = _clean_number(data["chart"]["result"][0]["meta"]["regularMarketPrice"])
         return _to_wad(price, self.fx)
+
+
+# ----------------------------------------------------------------- GPU spot feeds
+
+
+class NebiusSource(PriceSource):
+    """Nebius spot (preemptible) GPU prices — the JSON API behind
+    https://nebius.com/spot-prices (unauthenticated, no key).
+
+    ``symbol`` is a GPU model (``B300``, ``B200``, ``H200``, ``H100``,
+    ``RTX PRO 6000``), optionally pinned to one region with ``@``:
+    ``B300@us-central1``. Unpinned takes the LOWEST spot across regions —
+    the site's headline "current spot price".
+
+    Prices are USD per GPU-hour; ``fx`` (the usual US-source factor) applies.
+    """
+
+    name = "nebius"
+
+    def __init__(self, symbol: str, fx: float = None):
+        self.symbol, self.region = self._split(symbol)
+        self.fx = 1.0 if fx is None else float(fx)
+
+    @staticmethod
+    def _split(symbol: str):
+        gpu, _, region = (symbol or "").partition("@")
+        gpu = gpu.strip()
+        region = region.strip().lower() or None
+        if not gpu:
+            raise ValueError("nebius: empty GPU model")
+        return gpu, region
+
+    def fetch(self, _block: int) -> int:
+        base = os.getenv("NEBIUS_API_BASE", _DEFAULT_NEBIUS_BASE)
+        headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json"}
+        raw = _http_get(base, headers)
+        data = json.loads(raw.decode("utf-8", "replace"))
+        want = self.symbol.lower()
+        best = None
+        for item in data.get("items") or []:
+            if want not in (item.get("productTitle") or "").lower():
+                continue
+            if self.region and (item.get("region") or "").lower() != self.region:
+                continue
+            price = _clean_number((item.get("price") or {}).get("value"))
+            if best is None or price < best:
+                best = price
+        if best is None:
+            raise ValueError(
+                f"nebius: no spot price for {self.symbol}" + (f"@{self.region}" if self.region else "")
+            )
+        return _to_wad(best, self.fx)
 
 
 # --------------------------------------------------------------------- HK feeds
@@ -472,6 +527,14 @@ def build_feed(pair, log=None):
         else:
             sources = [TencentHKSource(symbol, fx=hk_fx), SinaHKSource(symbol, fx=hk_fx)]
         inner = FallbackSource(sources)
+    elif source == "nebius":
+        symbol = getattr(pair, "price_symbol", None) or getattr(pair, "symbol", None)
+        if not symbol:
+            logger.warning("nebius source without a symbol — using synthetic")
+            return synthetic()
+        # Single endpoint (no secondary): a total outage is handled by
+        # CachedSource's outage policy, not by a fake fallback chain.
+        inner = NebiusSource(symbol, fx=us_fx)
     elif source == "yahoo":
         symbol = getattr(pair, "price_symbol", None) or getattr(pair, "symbol", None)
         if not symbol:

@@ -3,6 +3,7 @@
 Run:  py -m unittest discover -s bot/tests -v
 """
 
+import json
 import os
 import sys
 import time
@@ -89,6 +90,86 @@ class YahooSourceTests(unittest.TestCase):
         body = b'{"chart":{"result":[{"meta":{"regularMarketPrice":217.23}}]}}'
         _patch_http(self, lambda url, headers=None, timeout=5: body)
         self.assertEqual(price_feed.YahooSource("NVDA").fetch(0), 217230000000000000000)
+
+
+# ------------------------------------------------------------------------- Nebius
+
+
+_NEBIUS_BODY = json.dumps(
+    {
+        "items": [
+            {
+                "skuId": "sku-e00vd4x28cozliwb6g4vh",
+                "productTitle": "Preemptible NVIDIA® B300 NVLink",
+                "region": "eu-west2",
+                "price": {"value": "9.19", "currency": "usd", "unitTitle": "GPU hour"},
+            },
+            {
+                "skuId": "sku-e00em8l461xmyihec7sr8",
+                "productTitle": "Preemptible NVIDIA® H200 NVLink",
+                "region": "us-central1",
+                "price": {"value": "0.79", "currency": "usd", "unitTitle": "GPU hour"},
+            },
+            {
+                "skuId": "sku-e00hfg6dlxtt9ji6fqo9u",
+                "productTitle": "Preemptible NVIDIA® B300 NVLink",
+                "region": "us-north1",
+                "price": {"value": "8.29", "currency": "usd", "unitTitle": "GPU hour"},
+            },
+        ],
+        "snapshotTime": "2026-10-20T06:32:55.757339Z",
+    }
+).encode("utf-8")
+
+
+class NebiusSourceTests(unittest.TestCase):
+    def _feed(self, symbol):
+        _patch_http(self, lambda url, headers=None, timeout=5: _NEBIUS_BODY)
+        return price_feed.NebiusSource(symbol)
+
+    def test_parses_lowest_across_regions(self):
+        self.assertEqual(self._feed("B300").fetch(0), 8290000000000000000)
+
+    def test_region_pin(self):
+        self.assertEqual(self._feed("B300@eu-west2").fetch(0), 9190000000000000000)
+
+    def test_region_pin_case_insensitive(self):
+        self.assertEqual(self._feed("B300@EU-WEST2").fetch(0), 9190000000000000000)
+
+    def test_other_gpu(self):
+        self.assertEqual(self._feed("H200").fetch(0), 790000000000000000)
+
+    def test_unknown_gpu_raises(self):
+        with self.assertRaises(ValueError):
+            self._feed("H100").fetch(0)
+
+    def test_unknown_region_raises(self):
+        with self.assertRaises(ValueError):
+            self._feed("B300@mars-1").fetch(0)
+
+    def test_empty_symbol_raises(self):
+        with self.assertRaises(ValueError):
+            price_feed.NebiusSource("")
+
+    def test_empty_items_raises(self):
+        _patch_http(self, lambda url, headers=None, timeout=5: b'{"items": []}')
+        with self.assertRaises(ValueError):
+            price_feed.NebiusSource("B300").fetch(0)
+
+    def test_fx_applied(self):
+        self.assertEqual(self._feed("B300").fetch(0) * 2, 16580000000000000000)
+
+    def test_api_base_env_override(self):
+        seen = {}
+
+        def fake(url, headers=None, timeout=5):
+            seen["url"] = url
+            return _NEBIUS_BODY
+
+        _patch_http(self, fake)
+        with mock.patch.dict(os.environ, {"NEBIUS_API_BASE": "http://127.0.0.1:9/spot"}):
+            price_feed.NebiusSource("B300").fetch(0)
+        self.assertEqual(seen["url"], "http://127.0.0.1:9/spot")
 
 
 # --------------------------------------------------------------------------- HK
