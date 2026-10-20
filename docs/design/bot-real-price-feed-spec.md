@@ -205,7 +205,11 @@ request ─▶ CachedSource
 ```
 
 - `ttl_seconds` default **60** — one fetch/min/asset; never fetch on every 5 s quote loop
-  (rate-limit safety across 4–5 pairs).
+  (rate-limit safety across 4–5 pairs). Also the **retry-throttle window**: `age` tracks the
+  last *successful* fetch, so during an outage it stays ≥ ttl forever — without a separate
+  `_last_attempt_at` guard every poll (and every ~0.4 s near-expiry tick) would hit the
+  network, i.e. a 429 storm that prolongs the outage. At most one fetch attempt per TTL
+  window; throttled ticks return last-good (or apply the outage policy) with no request.
 - `max_staleness_seconds` default **3600**; beyond it the outage policy applies.
 - **Outage policy (`PRICE_FEED_OUTAGE_POLICY`) default `halt`** (review feedback on PR #21):
   falling back to a `fairPrice` seed that is 15x off reality (SNDK 88 vs ≈1,394) makes the

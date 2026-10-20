@@ -394,6 +394,9 @@ class CachedSource(PriceSource):
                                     - ``halt`` (default): raise FeedOutageError
                                     - ``seed``: seed_wad + ERROR (legacy; the
                                       seed MUST be refreshed to real values)
+    * retry throttle: at most ONE fetch attempt per TTL window — ``age`` tracks
+      the last success, so during an outage every poll would otherwise hit the
+      network (a 429 storm that prolongs the outage)
     * a zero/absent seed under the ``seed`` policy also raises (a zero mark
       silently mints a zero quote amount)."""
 
@@ -413,7 +416,8 @@ class CachedSource(PriceSource):
         self._max_s = None if max_staleness_seconds is None else float(max_staleness_seconds)
         self.seed = int(seed_wad)
         self._value = None
-        self._at = 0.0
+        self._at = 0.0  # last SUCCESSFUL fetch (drives freshness/staleness)
+        self._last_attempt_at = 0.0  # last fetch ATTEMPT (drives retry throttling)
         self._log = log or globals()["log"]
         policy = outage_policy if outage_policy is not None else os.getenv(
             "PRICE_FEED_OUTAGE_POLICY", "halt"
@@ -428,12 +432,39 @@ class CachedSource(PriceSource):
             return self._max_s
         return _env_float("PRICE_FEED_MAX_STALENESS_SECONDS", 3600)
 
+    def _outage(self, age, error=None, throttled: bool = False) -> int:
+        """No usable price: no last-good, or last-good beyond staleness."""
+        if self._halt_on_outage:
+            self._log.error(
+                "price feed down %s — refusing to quote (outage policy=halt)%s",
+                f"(last {age:.0f}s ago) " if age is not None else "(nothing fetched yet) ",
+                f": {error}" if error is not None else " (retry throttled)",
+            )
+            raise FeedOutageError(
+                f"no usable price: feed down {f'{age:.0f}s' if age is not None else 'since start'}"
+            ) from error
+        if self.seed <= 0:
+            self._log.error("price feed down and seed unusable (%s) — cannot price", self.seed)
+            raise FeedOutageError(f"no usable price: feed down and seed={self.seed}") from error
+        self._log.error("price feed down beyond staleness — using seed (outage policy=seed)")
+        return self.seed
+
     def get(self, block: int) -> int:
         now = time.time()
         have = self._value is not None
         age = (now - self._at) if have else None
         if have and age < self._ttl():
             return self._value
+        # Retry throttle: `age` tracks the last SUCCESS, so during an outage it
+        # stays >= ttl forever — without this every poll (and every near-expiry
+        # tick, ~0.4 s) would hit the network, i.e. a 429 storm that prolongs the
+        # very outage it reacts to. At most one fetch attempt per TTL window.
+        if now - self._last_attempt_at < self._ttl():
+            if have and age < self._max():
+                self._log.debug("stale price (age %.0fs) — retry throttled, using last-good", age)
+                return self._value
+            return self._outage(age, throttled=True)
+        self._last_attempt_at = now
         try:
             value = self.inner.get(block)
             self._value = value
@@ -444,20 +475,7 @@ class CachedSource(PriceSource):
                 self._log.warning("stale price (age %.0fs) — using last-good: %s", age, e)
                 return self._value
             # Total outage: no last-good, or last-good beyond staleness.
-            if self._halt_on_outage:
-                self._log.error(
-                    "price feed down %s — refusing to quote (outage policy=halt): %s",
-                    f"(last {age:.0f}s ago) " if have else "(nothing fetched yet) ",
-                    e,
-                )
-                raise FeedOutageError(
-                    f"no usable price: feed down {f'{age:.0f}s' if have else 'since start'}"
-                ) from e
-            if self.seed <= 0:
-                self._log.error("price feed down and seed unusable (%s) — cannot price: %s", self.seed, e)
-                raise FeedOutageError(f"no usable price: feed down and seed={self.seed}") from e
-            self._log.error("price feed down beyond staleness — using seed (outage policy=seed): %s", e)
-            return self.seed
+            return self._outage(age, error=e)
 
 
 # ----------------------------------------------------------------------- factory

@@ -1156,7 +1156,14 @@ class MarketMakerBot:
                 # settlement quote vetoed during the window falls back to an identical
                 # canonical price. The settlement quote's expiry is E+G, so a delayed
                 # inclusion can no longer revert ExpiryMustBeFuture (#22).
-                fair = self.feed.get(block)
+                try:
+                    fair = self.feed.get(block)
+                except FeedOutageError as e:
+                    # Same contract as submit_quote: refuse to quote this tick
+                    # (the loop retries) instead of surfacing as a generic
+                    # "step failed" warning.
+                    log.error("[%s] %s — NOT quoting this tick", self.symbol, e)
+                    return
                 if active is None:
                     self.submit_quote(expiry, "final trading quote", fair=fair)
                 self._settlement_quote_id = self.submit_quote(

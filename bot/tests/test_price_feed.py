@@ -47,6 +47,19 @@ class _RaisingSource(price_feed.PriceSource):
         raise RuntimeError("boom")
 
 
+class _CountRaisingSource(price_feed.PriceSource):
+    """Raises, but counts attempts (for retry-throttle tests)."""
+
+    name = "count-raising"
+
+    def __init__(self):
+        self.calls = 0
+
+    def fetch(self, _block):
+        self.calls += 1
+        raise RuntimeError("boom")
+
+
 class _EchoSource(price_feed.PriceSource):
     """Returns its value; records the url/headers it would have fetched."""
 
@@ -298,6 +311,50 @@ class CachedSourceTests(unittest.TestCase):
         with _mock.patch.dict(_os.environ, {"PRICE_FEED_OUTAGE_POLICY": "halt"}):
             cache = price_feed.CachedSource(_RaisingSource(), ttl_seconds=0, seed_wad=3 * WAD)
             self.assertTrue(cache._halt_on_outage)
+
+    # ---- retry throttle (one fetch attempt per TTL window) -----------------
+
+    def test_throttles_refetch_during_outage(self):
+        inner = _CountSource(42 * WAD)
+        cache = price_feed.CachedSource(inner, ttl_seconds=100, max_staleness_seconds=3600, seed_wad=7 * WAD)
+        self.assertEqual(cache.get(1), 42 * WAD)
+        cache.inner = _CountRaisingSource()
+        # value + last attempt both 200s old: stale AND outside the throttle window
+        cache._at = cache._last_attempt_at = time.time() - 200
+        with self.assertLogs("irmarket-bot.price-feed", level="WARNING"):
+            self.assertEqual(cache.get(2), 42 * WAD)  # attempt #1 fails -> last-good
+        self.assertEqual(cache.inner.calls, 1)
+        self.assertEqual(cache.get(3), 42 * WAD)  # throttled: NO new attempt
+        self.assertEqual(cache.get(4), 42 * WAD)
+        self.assertEqual(cache.inner.calls, 1)
+
+    def test_throttle_window_expires(self):
+        inner = _CountSource(42 * WAD)
+        cache = price_feed.CachedSource(inner, ttl_seconds=0.05, max_staleness_seconds=3600, seed_wad=7 * WAD)
+        self.assertEqual(cache.get(1), 42 * WAD)
+        cache.inner = _CountRaisingSource()
+        time.sleep(0.06)  # value stale AND throttle window expired
+        with self.assertLogs("irmarket-bot.price-feed", level="WARNING"):
+            self.assertEqual(cache.get(2), 42 * WAD)
+        self.assertEqual(cache.inner.calls, 1)
+        self.assertEqual(cache.get(3), 42 * WAD)  # throttled
+        self.assertEqual(cache.inner.calls, 1)
+        time.sleep(0.06)
+        with self.assertLogs("irmarket-bot.price-feed", level="WARNING"):
+            cache.get(4)
+        self.assertEqual(cache.inner.calls, 2)  # window expired -> attempt again
+
+    def test_throttled_outage_still_raises_halt(self):
+        inner = _CountSource(42 * WAD)
+        cache = price_feed.CachedSource(inner, ttl_seconds=100, max_staleness_seconds=0, seed_wad=7 * WAD)
+        self.assertEqual(cache.get(1), 42 * WAD)
+        cache.inner = _CountRaisingSource()
+        cache._at = cache._last_attempt_at = time.time() - 200
+        with self.assertRaises(price_feed.FeedOutageError):
+            cache.get(2)  # attempt #1 fails, age 200 >= max 0 -> halt
+        with self.assertRaises(price_feed.FeedOutageError):
+            cache.get(3)  # throttled skip -> halt again, NO new attempt
+        self.assertEqual(cache.inner.calls, 1)
 
 
 # ------------------------------------------------------------------- FallbackSource
