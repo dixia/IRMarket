@@ -184,6 +184,26 @@ class NebiusSourceTests(unittest.TestCase):
             price_feed.NebiusSource("B300").fetch(0)
         self.assertEqual(seen["url"], "http://127.0.0.1:9/spot")
 
+    def test_malformed_item_does_not_abort_scan(self):
+        body = json.dumps(
+            {
+                "items": [
+                    {
+                        "productTitle": "Preemptible NVIDIA® B300 NVLink",
+                        "region": "eu-west2",
+                        "price": {"value": "N/A"},
+                    },
+                    {
+                        "productTitle": "Preemptible NVIDIA® B300 NVLink",
+                        "region": "uk-south1",
+                        "price": {"value": "7.30"},
+                    },
+                ]
+            }
+        ).encode("utf-8")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        self.assertEqual(price_feed.NebiusSource("B300").fetch(0), 7300000000000000000)
+
 
 # --------------------------------------------------------------------------- HK
 
@@ -354,6 +374,24 @@ class CachedSourceTests(unittest.TestCase):
             cache.get(2)  # attempt #1 fails, age 200 >= max 0 -> halt
         with self.assertRaises(price_feed.FeedOutageError):
             cache.get(3)  # throttled skip -> halt again, NO new attempt
+        self.assertEqual(cache.inner.calls, 1)
+
+    def test_throttled_ticks_do_not_log_errors(self):
+        """A throttled tick repeats every poll (down to ~0.4s near expiry); it must
+        not emit an ERROR per tick (that would be a log storm). Only the actual
+        attempt logs loudly."""
+        inner = _CountSource(42 * WAD)
+        cache = price_feed.CachedSource(
+            inner, ttl_seconds=100, max_staleness_seconds=0, seed_wad=7 * WAD, outage_policy="seed"
+        )
+        self.assertEqual(cache.get(1), 42 * WAD)
+        cache.inner = _CountRaisingSource()
+        cache._at = cache._last_attempt_at = time.time() - 200
+        with self.assertLogs("irmarket-bot.price-feed", level="ERROR"):
+            self.assertEqual(cache.get(2), 7 * WAD)  # real attempt -> ERROR
+        with self.assertNoLogs("irmarket-bot.price-feed", level="ERROR"):
+            for _ in range(20):
+                self.assertEqual(cache.get(3), 7 * WAD)  # throttled -> silent
         self.assertEqual(cache.inner.calls, 1)
 
 

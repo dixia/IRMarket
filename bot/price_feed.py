@@ -282,7 +282,10 @@ class NebiusSource(PriceSource):
                 continue
             if self.region and (item.get("region") or "").lower() != self.region:
                 continue
-            price = _clean_number((item.get("price") or {}).get("value"))
+            try:
+                price = _clean_number((item.get("price") or {}).get("value"))
+            except ValueError:
+                continue  # a malformed SKU row must not kill the whole scan
             if best is None or price < best:
                 best = price
         if best is None:
@@ -433,9 +436,14 @@ class CachedSource(PriceSource):
         return _env_float("PRICE_FEED_MAX_STALENESS_SECONDS", 3600)
 
     def _outage(self, age, error=None, throttled: bool = False) -> int:
-        """No usable price: no last-good, or last-good beyond staleness."""
+        """No usable price: no last-good, or last-good beyond staleness.
+
+        Throttled ticks only log at DEBUG: they repeat every poll (down to
+        ~0.4 s near expiry) and the caller already reports the outcome — an
+        ERROR per tick would be a log storm with no new information."""
+        loud = not throttled
         if self._halt_on_outage:
-            self._log.error(
+            (self._log.error if loud else self._log.debug)(
                 "price feed down %s — refusing to quote (outage policy=halt)%s",
                 f"(last {age:.0f}s ago) " if age is not None else "(nothing fetched yet) ",
                 f": {error}" if error is not None else " (retry throttled)",
@@ -444,9 +452,13 @@ class CachedSource(PriceSource):
                 f"no usable price: feed down {f'{age:.0f}s' if age is not None else 'since start'}"
             ) from error
         if self.seed <= 0:
-            self._log.error("price feed down and seed unusable (%s) — cannot price", self.seed)
+            if loud:
+                self._log.error("price feed down and seed unusable (%s) — cannot price", self.seed)
             raise FeedOutageError(f"no usable price: feed down and seed={self.seed}") from error
-        self._log.error("price feed down beyond staleness — using seed (outage policy=seed)")
+        (self._log.error if loud else self._log.debug)(
+            "price feed down beyond staleness — using seed (outage policy=seed)%s",
+            "" if loud else " (retry throttled)",
+        )
         return self.seed
 
     def get(self, block: int) -> int:
