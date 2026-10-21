@@ -74,3 +74,8 @@ _Tracking convention: this file is only an index — each item references a GH i
 
 - GH: https://github.com/dixia/IRMarket/issues/27
 - Status: **DONE (2026-10-19)** — `irmarket.xyz` now runs the redeployed wrapper `0x3B08bd1C…` (oracle `0x8073…` unchanged; vault `0x95a7…` and all tokens reused, 15,002 HKD LP equity intact). Ops bot re-pointed + restarted (first line: `create_market=250,000`). Rollback = re-promote the previous production deployment + restore the server's `*.bak-preW2` bot config. Old wrapper `0x39A1…` stays on-chain, dormant.
+
+## Frontend: real-time market data & interaction performance overhaul (P0–P2)
+
+- GH: https://github.com/dixia/IRMarket/issues/29
+- Status: **OPEN** — WS push relay + global store (P0-1), RollingNumber (P0-2), fine-grained selectors (P0-3), theme bootstrap + up/down colors (P0-4); P1 optimistic UI / tiered polling / chunk preload / PWA / i18n; P2 session keys / stream origin / docs SSG / brand visuals. No contract changes; relay is a stateless indexer.

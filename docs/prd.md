@@ -21,6 +21,17 @@
 
 ## 修订记录
 
+### V1.0 → V1.0.1（deck promise baseline 对齐 + 文档校正）
+
+| # | 位置 | 修改 | 原因 |
+|---|------|------|------|
+| R23 | §1.4 | **项目当前状态重写**：分叉已废弃（CWV-01）→ 上游消费模式；wrapper + vault 已部署测试网、`irmarket.xyz` 在线；测试/录像/决策状态更新 | 原文"脚手架完成 / Demo 进入开发准备阶段"与 §十一 11.4 事实矛盾 |
+| R24 | §1.1 | 信任表述精确化："无链下预言机"= 无可信**验证方**（经济执行），价格数据源仍是 bot 接入的链下行情（B5）；补"三个前提皆缺"产品存在理由 | deck slide 10 的攻击向量要求精确；防止评审被"bot 拉行情 = 链下预言机"反问 |
+| R25 | §1.3 | 新增可审计性（开源 + e2e）；"随时平仓"加路径限定（veto 路径 / vault 仅到期结算） | deck 承诺项；vault MVP 无提前平仓（§11.3 #2），勿混宣 |
+| R26 | §2.1 | 开市权范围界定：免权限上架 = oracle 报价对 + wrapper 市场；vault = 策展 pair 运营方部署（architecture §7） | "anyone can list" 与 vault 单池现实按路径分开表述 |
+| R27 | §11.3 | 补充披露 #7（MVP 无 admission control）/#8（池子卖 capped unhedgeable exposure；价格正确 ≠ 资本充足） | deck speaker note 的诚实锚点；tech-spec §4.4/§7/§8.6 |
+| R28 | 新增 §十二 | 路线图 V1（PriceAdapter/风控/提前平仓/权金定价 Q9/多池）→ V2（链上期权订单簿、主网） | deck V2 承诺（limit orders + professional MM）+ calibration 是 Milestone 2 |
+
 ### V0.7 → V0.8（Veto-Market 架构重构）
 
 | # | 位置 | 修改 | 原因 |
@@ -110,7 +121,11 @@ Monoracle 是一个"**报价 + 免许可否决仲裁**"的链上价格市场，*
 
 ### 1.1 产品定位
 
-IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：任何有公开价格的资产（A股/港股现货、Labubu 等）都可以成为交易标的。底层直接复用 **Monoracle 否决-套利原语**——bot 持续对标的报价，用户以「看涨/看跌」直接参与价格验证（否决套利），盈亏在套利换手中当场实现。全程无链下预言机、无中心化结算节点。〔V1.0〕资金池对手方模式已作为**并行选项**实现（§十一），原无池 veto-market 保持可用。
+IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：任何有公开价格的资产（A股/港股现货、Labubu 等）都可以成为交易标的。底层直接复用 **Monoracle 否决-套利原语**——bot 持续对标的报价，用户以「看涨/看跌」直接参与价格验证（否决套利），盈亏在套利换手中当场实现。〔V1.0〕资金池对手方模式已作为**并行选项**实现（§十一），原无池 veto-market 保持可用。
+
+> **信任表述的准确边界（deck slide 10 对齐）**："无链下预言机、无中心化结算节点"指的是**无可信的验证方**：价格由 provider 双边抵押报价产生，正确性由免许可否决套利**经济执行**（错误报价 = 送给第一个套利者的利润）。价格的*数据源*仍是 bot 接入的链下行情（§九 B5）——被信任的是机制，不是节点、不是公司、不是投票集合。竞争对照见 `product/cmp_decentralisation.md`。
+
+> **产品存在理由（deck speaker note）**：每个市场都隐含三个前提——venue、price feed、counterparties；新兴资产（A股、港股小盘、Labubu、GPU-hour）三者皆缺。IRMarket 用同一原语同时补足三者，且不引入第四个前提（信任）。
 
 产品UI对标轻量化预测市场：用户只需对标的价格方向做判断，界面把 `vetoUnderpriced` / `vetoOverpriced` 包装成「看涨开仓」「看跌开仓」按钮。
 
@@ -130,15 +145,18 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 1. **去信任结算**：价格可信度由 Monoracle 双边抵押 + 免许可否决仲裁保证；盈亏在否决套利交易内当场完成资产换手（🔁 原生机制）
 2. **零和全抵押**：用户盈利 = provider 抵押品亏损（`|T−P|×size`），系统内不存在资不抵债（✅ D-10）
 3. **有限风险**：用户最大亏损 = 单次 veto 投入的本金（+手续费），无爆仓、无追缴
-4. **随时平仓**：反向 veto 即平仓（bot 持续报价提供双向流动性）
+4. **随时平仓（veto-market 路径）**：反向 veto 即平仓（bot 持续报价提供双向流动性）；**LP vault MVP 仅到期结算**（无提前平仓，§十一 11.3 #2）——"随时平仓"承诺按路径区分，勿混宣
 5. **高性能底层**：Monad 300ms 出块；否决窗口 = 期权到期日（✅ D-13，无秒级交易竞争）
 6. **极简交互**：卡片式 UI，"看涨/看跌"两个按钮背后即两个 veto 方向
+7. **可审计**：合约与测试全开源（`github.com/dixia/monoracle` + `github.com/dixia/IRMarket`），报价/否决/持仓/结算关键链路端到端测试覆盖（deck 承诺项）
 
 ### 1.4 项目当前状态
 
-- 脚手架完成；`contracts/Monoracle.sol` 分叉合约已就位（唯一改动：quote 级 `expiryBlock` 窗口，D-13）+ 6 个窗口测试通过；`abi/Monoracle.abi.json` 已由分叉构建重新生成
-- V0.8.1 架构已由用户确认（D-07~D-16）
-- Demo 进入开发准备阶段
+- **Monoracle：上游消费模式（无分叉）**——上游 `github.com/dixia/monoracle` 已合并 quote 级 `expiryBlock`（CWV-01，GH issue #2 已关闭）；本 repo 通过 `IMonoracle.sol` 接口 + `Monoracle.json` artifact 消费，测试用 `contracts/test/MonoracleMock.sol`；IRMarket 侧脚本永不部署 oracle（A-shape 指纹门禁，见 `architecture.md` §6 硬规则）
+- **合约**：IRMarket 薄层（工厂 + 1% 费用包裹，wrapper）+ `IRMarketVault`（单资产 cap-linear 资金池，V1.0 MVP 已实现并收口，✅ D-17/D-18）
+- **部署**：Monad 测试网（chain 10143）；线上 demo `irmarket.xyz`（Vercel）；vault / oracle / NVDA / HKD 地址见 §十一 11.4 与 `deployment.json` / `deployment-assets.json`
+- **测试与验收**：`npm run test:unit` = 17 通过；Playwright E2E = 20/20（含 vault 三用例）；用户流程录像 `docs/product/videos/lp-vault-user-flow.webm`
+- **决策状态**：D-01 ~ D-18 均已拍板（见 §八）；未决：Q9 资金池产品模型（期权权金 vs 预付封顶交易，见 §八/§十二）
 
 ---
 
@@ -155,7 +173,7 @@ IRMarket 是部署在 Monad 区块链上的**奇异标的链上多空市场**：
 - **结算资产**：测试币 `HKD`（计价）/ `LLM`（标的），MockERC20 自铸（Monad 测试网无官方币）；报价对 = `(base=LLM, quote=HKD)`，价格 = HKD/LLM
 - **风险机制**：无爆仓、无追缴、无强平；最大亏损 = 投入本金。⚠️ 期权/杠杆术语已弃用，即"以 P 价格换手后承担标的涨跌"的现货式敞口
 - **价格基准**：全部盈亏以 `getLatestPrice` 为准（开仓价 = 被否决报价的 price；终价 = 到期 bot 最终报价，✅ D-06）
-- **开市权**：任何人为任意资产对建市（✅ D-07：报价对 = 市场；与 Polymarket 平台审理制不同，Monoracle 天然支持任意配对）
+- **开市权**：任何人为任意资产对建市（✅ D-07：报价对 = 市场；与 Polymarket 平台审理制不同，Monoracle 天然支持任意配对）。**范围界定**：该权限覆盖 oracle 报价对 + wrapper 市场（D-14 不去重）；LP vault 是**策展 pair 的运营方部署合约**（MVP 单池 NVDA，architecture.md §7 每 pair 独立 vault 模型）——"任何人可上架"按两条路径分别表述，勿混宣
 
 ### 2.2 报价与手续费规则
 
@@ -466,6 +484,8 @@ Vault 页（canonical 价格头 + MVP 限制横幅）
 4. 结算选择权：按调用时价格结算（类美式）
 5. 存盘稀释：持仓期存入按折价权益获得份额
 6. 极端值溢出可令持仓永久搁置（有界 grief）
+7. **无 admission control**：MVP 仅有 `pendingPayout ≤ balance` 偿付不变量；利用率 / 单边敞口 / 单笔上限（tech-spec §7）为 V1——deck "在池资本与风控限额内开仓"目前只兑现"资本"一半
+8. **池子卖的是 capped unhedgeable exposure**：价格正确 ≠ 池子资本充足（deck speaker note）；LP 承担有上限、无对冲工具的方向性风险（tech-spec §4.4/§8.6）
 
 ### 11.4 验收（✅ 全部达成）
 
@@ -473,3 +493,27 @@ Vault 页（canonical 价格头 + MVP 限制横幅）
 - `npm run test:unit` = 17 通过；Playwright E2E = **20/20**（含 13-vault 三用例）
 - 用户流程录像：`docs/product/videos/lp-vault-user-flow.webm`（开仓 → 价格 130→150 → Open PnL 转正 +1.x）
 - 测试网部署（**upstream (A) consumer stack**，已锚定 Vercel Preview；`irmarket.xyz` 切换前仍为 fork 栈，地址普查见 `docs/design/monoracle-version-survey.md`）：vault `0x95a74C58…67dD3`、oracle `0x80732110…9f4D`（上游构建**被消费**，永不重部署）、NVDA `0xda9CF5A6…DE17`、HKD `0x36448Ef0…4F04`；演示 LP 已播种（vault `Equity 5,000 HKD`）
+
+---
+
+## 十二、路线图（V1 → V2）
+
+> 对齐 deck V2 承诺："Limit orders + professional market makers" / "explore an on-chain Option Order
+> book"；calibration（抵押、挑战窗口、费用/权金）是 **Milestone 2，不是配置细节**；主网部署的
+> 前提是"validate one complete market lifecycle + harden the UX"（deck：mainnet 未承诺）。
+
+### V1（MVP 之后，按 `docs/design/lp-pool-tech-spec.md` 推进）
+
+| 方向 | 内容 | 规格 |
+|---|---|---|
+| 价格安全 | PriceAdapter：最小抵押名义额（bond floor）、时效性、熔断、banned provider | tech-spec §8（§8.4 定 `minQuoteNotional` ≈ 0.7×equity） |
+| 风控准入 | utilization / 单边敞口 / 单笔上限 + 参数 timelock | tech-spec §7 |
+| 产品完整 | 提前平仓（`closeFeeBps`）、deferral → refund 路径、结算钉到期窗口（消美式选择权） | tech-spec §9.2/§9.3/§9.4 |
+| 权金定价 | 真实期权权金（**Q9 解阻后**）：σ 来源（结算价历史）、上下界、pricing provider 身份/LP-06 扩展 | `docs/design/lp-pool-premium-pricing-spec.md`（当前仅在 git 历史 `7435a34`/`af7df7e`，解阻后先恢复） |
+| 多池 | 每策展 pair 独立 vault；LP 只能存该 pair 的 vault | `architecture.md` §7 |
+
+### V2
+
+- **链上期权订单簿**：限价单 + 专业做市商（deck V2 原话）；当前两条路径（veto / vault 池）均无订单簿
+- **主网部署**：完整市场生命周期验证 + UX 强化后上 Monad 主网
+- 规模化的前提（deck 原话）："scale comes after the assumptions are documented and tested"

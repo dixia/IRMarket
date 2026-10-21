@@ -115,32 +115,24 @@ MULTICALL3_ABI = [
 ]
 
 # Fixed gas limits — Monad bills the gas LIMIT, not gas used (sc-tech-spec §7), so an
-# inflated limit burns MON on every single send. These are measured gasUsed plus
-# head-room, not round numbers pulled out of the air:
+# inflated limit burns MON on every single send. These are **measured gasUsed + 5%**,
+# re-measured on the live stack 2026-10-21 with `eth_estimateGas` on the exact calldata
+# of real bot transactions (historical block where needed):
 #
-#   approve         47,242   cold 0 -> max (locally measured; 33,586 live on the
-#                           deployed quote token)
-#   submit_quote   292,944   live eth_estimateGas on the deployed oracle. Re-measured
-#                           276,345 at a historical block on 2026-10-21; the higher
-#                           figure is the first-of-round cold SSTOREs, i.e. the real
-#                           worst case.
-#   settle          65,429   live eth_estimateGas on the deployed oracle. 48,192 is
-#                           the WARM `latestValidQuoteId` slot; 65,429 is the first
-#                           settle per pair (0 -> nonzero SSTORE).
-#   withdraw       123,206   live eth_estimateGas at a historical pre-withdraw block
-#                           (matches the recorded 123,194; a debug_traceTransaction
-#                           shows the two ERC20 transfers) on the UPSTREAM oracle.
-#                           The old fork needed only 74,295, and 120,000 was too tight
-#                           here and made every withdraw revert out-of-gas.
-#   create_market 198,542   live eth_estimateGas on the deployed wrapper; it is
-#                           this high because createMarket makes two unconditional
-#                           forceApprove calls (contracts/IRMarket.sol). The guard
-#                           added there cuts it (160,575 guarded live; locally
-#                           181,968 -> 135,212), so 240,000 covers both shapes.
+#   op             live cold   mock first    adopted
+#   approve            33,586       47,242      56,691
+#   submit_quote      287,219      292,944     315,413
+#   settle             48,192       65,429      72,956
+#   withdraw          123,206      123,206     129,367
+#   create_market     172,678      198,542     218,789
 #
-# LIMITS = measured x 1.20, rounded UP to 10k. 1.20 is the floor enforced by
-# test/gas.test.js (MIN_HEADROOM=120%), and it is deliberate: a revert still costs
-# the WHOLE limit, and the warm/cold variants above already spread by ~6%.
+# "live cold" = eth_estimateGas on the real oracle/wrapper (the production path);
+# "mock/first" = the local Hardhat gas test and the first-of-round cold SSTOREs
+# (fresh allowance slot, first settle per pair writing latestValidQuoteId). Adopted =
+# the larger of live x1.05 and first-call x1.05, so both the production cost and
+# test/gas.test.js's 120% headroom tripwire are satisfied. A test run with the bare
+# live values reverted createMarket and one submitQuote out of gas — the tripwire
+# was right.
 #
 # Re-measure with `npx hardhat run script/gas-report.js` (local) or eth_estimateGas
 # (live) before changing any of these. test/gas.test.js fails if a limit drops below
@@ -153,11 +145,11 @@ MULTICALL3_ABI = [
 # Each entry is overridable with GAS_<OP>_WEI (e.g. GAS_SUBMIT_QUOTE_WEI=500000) so a
 # limit can be bumped in production without a code change.
 GAS_DEFAULTS = {
-    "approve": 60_000,
-    "submit_quote": 360_000,
-    "settle": 80_000,
-    "withdraw": 150_000,
-    "create_market": 240_000,
+    "approve": 56_691,
+    "submit_quote": 315_413,
+    "settle": 72_956,
+    "withdraw": 129_367,
+    "create_market": 218_789,
 }
 
 
