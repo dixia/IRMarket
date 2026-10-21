@@ -118,18 +118,29 @@ MULTICALL3_ABI = [
 # inflated limit burns MON on every single send. These are measured gasUsed plus
 # head-room, not round numbers pulled out of the air:
 #
-#   approve         33,586   live eth_estimateGas on the deployed quote token
-#   submit_quote   292,944   live eth_estimateGas on the deployed oracle
-#   settle          65,429   live eth_estimateGas on the deployed oracle
-#   withdraw       123,194   live eth_estimateGas on the UPSTREAM oracle (the old
-#                           fork needed only 74,295; 120,000 was too tight here and
-#                           made every withdraw revert out-of-gas)
+#   approve         47,242   cold 0 -> max (locally measured; 33,586 live on the
+#                           deployed quote token)
+#   submit_quote   292,944   live eth_estimateGas on the deployed oracle. Re-measured
+#                           276,345 at a historical block on 2026-10-21; the higher
+#                           figure is the first-of-round cold SSTOREs, i.e. the real
+#                           worst case.
+#   settle          65,429   live eth_estimateGas on the deployed oracle. 48,192 is
+#                           the WARM `latestValidQuoteId` slot; 65,429 is the first
+#                           settle per pair (0 -> nonzero SSTORE).
+#   withdraw       123,206   live eth_estimateGas at a historical pre-withdraw block
+#                           (matches the recorded 123,194; a debug_traceTransaction
+#                           shows the two ERC20 transfers) on the UPSTREAM oracle.
+#                           The old fork needed only 74,295, and 120,000 was too tight
+#                           here and made every withdraw revert out-of-gas.
 #   create_market 198,542   live eth_estimateGas on the deployed wrapper; it is
 #                           this high because createMarket makes two unconditional
 #                           forceApprove calls (contracts/IRMarket.sol). The guard
-#                           added there cuts it ~25% (locally 181,968 -> 135,212),
-#                           i.e. ~150,000, so 250,000 covers both the deployed and
-#                           the fixed contract.
+#                           added there cuts it (160,575 guarded live; locally
+#                           181,968 -> 135,212), so 240,000 covers both shapes.
+#
+# LIMITS = measured x 1.20, rounded UP to 10k. 1.20 is the floor enforced by
+# test/gas.test.js (MIN_HEADROOM=120%), and it is deliberate: a revert still costs
+# the WHOLE limit, and the warm/cold variants above already spread by ~6%.
 #
 # Re-measure with `npx hardhat run script/gas-report.js` (local) or eth_estimateGas
 # (live) before changing any of these. test/gas.test.js fails if a limit drops below
@@ -143,10 +154,10 @@ MULTICALL3_ABI = [
 # limit can be bumped in production without a code change.
 GAS_DEFAULTS = {
     "approve": 60_000,
-    "submit_quote": 400_000,
-    "settle": 100_000,
-    "withdraw": 200_000,
-    "create_market": 250_000,
+    "submit_quote": 360_000,
+    "settle": 80_000,
+    "withdraw": 150_000,
+    "create_market": 240_000,
 }
 
 

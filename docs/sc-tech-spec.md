@@ -357,11 +357,11 @@ when a quote settles (B12).
 
   | Op | Measured gasUsed | Limit | Where |
   |---|---|---|---|
-  | `createMarket` | 198,542 (unguarded, live) / 160,575 (guarded, live) | 250,000 | bot `GAS` |
-  | `submitQuote` | 292,944 | 400,000 | bot `GAS` |
-  | `settleValidQuote` | 48,180 (live upstream) | 100,000 | bot `GAS` |
-  | `withdrawProviderFunds` | 74,295 (mock) / **123,194 (live upstream)** | 200,000 | bot `GAS` |
-  | ERC20 `approve` | 33,586 | 60,000 | bot `GAS` + web |
+  | `createMarket` | 198,542 (unguarded, live) / 160,575 (guarded, live) | 240,000 | bot `GAS` |
+  | `submitQuote` | 292,944 (first of round; 276,345 warm) | 360,000 | bot `GAS` |
+  | `settleValidQuote` | 48,180 (warm, live) / 65,429 (first per pair) | 80,000 | bot `GAS` |
+  | `withdrawProviderFunds` | 74,295 (mock) / **123,206 (live upstream)** | 150,000 | bot `GAS` |
+  | ERC20 `approve` | 33,586 (live) / 47,242 (cold 0→max, local) | 60,000 | bot `GAS` + web |
   | `openLong` / `openShort` | 138,547–152,148 (mock; ~170,000 real) | 260,000 | web |
   | `vetoUnderpriced` / `vetoOverpriced` | 77,122 (mock; ~86,000 real) | 160,000 | web |
   | vault writes | 61,663–267,573 | 120,000–400,000 | web |
