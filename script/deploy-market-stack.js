@@ -174,6 +174,17 @@ async function main() {
   const reuseQuote = !FRESH_TOKENS && registry?.quoteToken && ethers.isAddress(registry.quoteToken) ? registry.quoteToken : undefined;
   const bySymbol = new Map((registry?.assets || []).map((a) => [a.symbol, a]));
 
+  // deployment-assets.json is REWRITTEN wholesale from ASSETS at the end of this script,
+  // so a symbol present in the current registry but absent from ASSETS is silently
+  // dropped (losing its token/market links). Surface that instead of shrinking quietly.
+  const dropped = [...bySymbol.keys()].filter((s) => !assets.some((a) => a.symbol === s));
+  if (dropped.length) {
+    console.warn(
+      `WARNING: ASSETS omits registry symbol(s) ${dropped.join(", ")} — they will be DROPPED ` +
+        "from deployment-assets.json. Add them to ASSETS to keep them."
+    );
+  }
+
   // wrapper reuse: only if the existing wrapper is bound to this exact oracle
   // (FRESH_WRAPPER=1 / --fresh-wrapper: deploy new, same-oracle rebuild — see header).
   let wrapperAddr;

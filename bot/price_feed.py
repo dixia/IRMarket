@@ -214,12 +214,16 @@ class NasdaqSource(PriceSource):
         headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json"}
         raw = _http_get(url, headers)
         data = json.loads(raw.decode("utf-8", "replace"))
-        primary = data["data"]["primaryData"]
-        price = _clean_number(primary["lastSalePrice"])
+        payload = data.get("data") or {}
+        primary = payload.get("primaryData") or {}
+        price = _clean_number(primary.get("lastSalePrice"))
         # Market-status context (spec §5.3): outside trading hours the last sale is
         # a valid frozen mark, but a frozen price must be distinguishable from a
         # stuck feed when explaining a demo — log it at DEBUG, with the trade time.
-        status = (primary.get("marketStatus") or "").strip()
+        # `marketStatus` is a SIBLING of `primaryData` in the live response
+        # (`lastTradeTimestamp` is the one nested inside it):
+        #   {"data": {"primaryData": {...}, "marketStatus": "Closed", ...}}
+        status = (payload.get("marketStatus") or "").strip()
         if status and status.lower() != "open":
             log.debug(
                 "nasdaq %s: market %s, last sale %s (%s)",

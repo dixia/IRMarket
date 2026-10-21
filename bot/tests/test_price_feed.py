@@ -95,14 +95,18 @@ class NasdaqSourceTests(unittest.TestCase):
             self._feed("").fetch(0)
 
     def test_closed_market_logs_status_and_trade_time_at_debug(self):
+        # Live shape (api.nasdaq.com, verified): `marketStatus` is a sibling of
+        # `primaryData`; `lastTradeTimestamp` is nested inside it.
         body = json.dumps(
             {
                 "data": {
+                    "symbol": "SOXX",
+                    "marketStatus": "Closed",
+                    "assetClass": "ETF",
                     "primaryData": {
                         "lastSalePrice": "$514.71",
-                        "marketStatus": "Closed",
                         "lastTradeTimestamp": "Oct 20, 2026 4:00 PM",
-                    }
+                    },
                 }
             }
         ).encode("utf-8")
@@ -114,11 +118,39 @@ class NasdaqSourceTests(unittest.TestCase):
 
     def test_open_market_logs_nothing(self):
         body = json.dumps(
-            {"data": {"primaryData": {"lastSalePrice": "$514.71", "marketStatus": "Open"}}}
+            {
+                "data": {
+                    "marketStatus": "Open",
+                    "primaryData": {"lastSalePrice": "$514.71"},
+                }
+            }
         ).encode("utf-8")
         _patch_http(self, lambda url, headers=None, timeout=5: body)
         with self.assertNoLogs("irmarket-bot.price-feed", level="DEBUG"):
             self.assertEqual(price_feed.NasdaqSource("SOXX", "etf").fetch(0), 514710000000000000000)
+
+    def test_closed_market_nested_in_primary_data_does_not_log(self):
+        """Regression guard for the shape mix-up: a nested `marketStatus` is NOT
+        the live location, so reading only `primaryData` would miss "Closed"."""
+        body = json.dumps(
+            {
+                "data": {
+                    "primaryData": {
+                        "lastSalePrice": "$514.71",
+                        "marketStatus": "Closed",
+                    }
+                }
+            }
+        ).encode("utf-8")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        with self.assertNoLogs("irmarket-bot.price-feed", level="DEBUG"):
+            price_feed.NasdaqSource("SOXX", "etf").fetch(0)
+
+    def test_missing_price_raises_for_fallback(self):
+        body = json.dumps({"data": {"marketStatus": "Closed", "primaryData": {}}}).encode("utf-8")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        with self.assertRaises(ValueError):
+            price_feed.NasdaqSource("SOXX", "etf").fetch(0)
 
 
 # --------------------------------------------------------------------------- Yahoo

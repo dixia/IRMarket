@@ -344,16 +344,21 @@ timeout-bounded (≈5 s) and wrapped so an exception can never bubble into `step
 
 **Unit (new `bot/tests/`, no chain):**
 - [x] `NasdaqSource` parses `"$514.71"` → `514710000000000000000` WAD; `"$1,394.83"` →
-      `1394830000000000000000`; rejects `"N/A"`/`""`.
+      `1394830000000000000000`; rejects `"N/A"`/`""`/missing `lastSalePrice`.
+      A non-`Open` `marketStatus` (a **sibling** of `primaryData` — verified against the live
+      response) logs at DEBUG with `lastTradeTimestamp`; `Open` logs nothing.
 - [x] `NebiusSource` (issue #28): lowest spot across regions for a GPU model
       (`B300` → 6.70 USD/GPU-hour live); `@region` pin (`B300@us-north1` → 8.29);
-      unknown GPU/region and empty `items` raise; `fx` applied.
+      unknown GPU/region and empty `items` raise; `fx` applied; a malformed SKU row is
+      skipped rather than aborting the scan.
 - [x] `SinaHKSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6;
       `TencentHKSource` parses `v_hk02513="…~02513~518.000~…"` → field 3.
 - [x] GBK company-name bytes decode without raising (`errors="replace"`).
 - [x] `CachedSource`: within TTL no second HTTP call; past TTL refetches; all-sources-down but
       within `max_staleness` returns last-good; past it the outage policy applies (default
       `halt` raises `FeedOutageError`; `seed` returns the seed with ERROR; zero seed raises).
+      Retry throttle: at most one fetch attempt per TTL window, so an outage does not
+      re-hit the network on every poll; throttled ticks emit no ERROR.
 - [x] `FallbackSource`: primary 500 → secondary value returned (Sina down → Tencent).
 - [x] `SyntheticWalkSource` still clamps to ±20% of seed (regression guard).
 - [x] `build_feed` picks source from `priceSource`; unknown ⇒ synthetic.
