@@ -28,7 +28,7 @@ _Tracking convention: this file is only an index — each item references a GH i
 
 - GH: https://github.com/dixia/IRMarket/issues/13
 - Spec: `docs/design/bot-real-price-feed-spec.md` (in the `IRMarket-pricefeed` worktree)
-- Status: **PR #21 open, MERGEABLE** — 7 commits on `feat/real-price-feed` (spec, feed module + wiring, SOXX/descriptors, test marker, outage-halt fix, main merge, Nebius GPU feed from #28); rebased onto latest `main` (settlement window E+G, wrapper trade gate, bounded bookkeeping, Multicall3 batching preserved); 46/46 bot unittests. Review: approve-with-follow-ups — major 1 + nits done, major 3 resolved (pushed `main`). Remaining: CI `bot` job (major 2) + merge. (The `feat/monoracle-upstream` base named in the issue does not exist on the remote; base is `main`.)
+- Status: **PR #21 open, MERGEABLE — all checks green; ready to merge.** 11 commits on `feat/real-price-feed` (spec, feed module + wiring, SOXX/descriptors, test marker, outage-halt fix, main merges, Nebius GPU feed from #28, retry throttle + step guard, CI/nits). All review items closed: outage halt policy, retry throttle (1 attempt/TTL), throttled-tick log spam, malformed-row robustness, CI `bot` job (green), Nasdaq market-status logging, nits. Bot suite 54/54; `contracts`/`web`/Vercel green. Remaining: the merge itself. (The `feat/monoracle-upstream` base named in the issue does not exist on the remote; base is `main`.)
 
 ## Nebius spot GPU price feed (research + impl)
 
