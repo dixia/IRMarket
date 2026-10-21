@@ -24,7 +24,6 @@ trade, zero-sum (D-10); the 1% wrapper fee lands at market.marketMaker in HKD.
 
 import logging
 import os
-import random
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +31,14 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from eth_abi import decode
 from web3 import Web3
+
+try:  # script dir on sys.path when run as `python bot/verifier.py`
+    from price_feed import FeedOutageError, build_feed
+except ImportError:  # imported as a package (bot.verifier) rather than a script
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from price_feed import FeedOutageError, build_feed
 
 # Load bot/.env by EXPLICIT PATH, not via a bare load_dotenv().
 #
@@ -114,22 +121,18 @@ MULTICALL3_ABI = [
 #
 #   op             live cold   mock first    adopted
 #   approve            33,586       47,242      56,691
-#   submit_quote      287,219      262,844     315,413
-#   settle             48,192       60,796      72,956
-#   withdraw          123,206       ~49,000     129,367
-#   create_market     172,678      182,324     218,789
+#   submit_quote      287,219      292,944     315,413
+#   settle             48,192       65,429      72,956
+#   withdraw          123,206      123,206     129,367
+#   create_market     172,678      198,542     218,789
 #
 # "live cold" = eth_estimateGas on the real oracle/wrapper (the production path);
-# "mock first" = the local Hardhat gas test, which also covers the FIRST-call state
-# (fresh allowance slot) that a warm live estimate misses. Adopted = the larger of
-# live x1.05 and mock x1.20, so both the production cost and test/gas.test.js's
-# 120% headroom tripwire are satisfied. A test run with the bare live values
-# reverted createMarket and one submitQuote out of gas — the tripwire was right.
-#
-# The old table carried 30-50% head-room per op; on Monad that head-room is paid on
-# every send (limit x gas price), so it was pure burn: the bot spent ~0.87 MON/hour
-# with three pairs at 102 gwei. The measured values are stable across samples (+-12
-# gas), and the 5% buffer covers a colder storage path.
+# "mock/first" = the local Hardhat gas test and the first-of-round cold SSTOREs
+# (fresh allowance slot, first settle per pair writing latestValidQuoteId). Adopted =
+# the larger of live x1.05 and first-call x1.05, so both the production cost and
+# test/gas.test.js's 120% headroom tripwire are satisfied. A test run with the bare
+# live values reverted createMarket and one submitQuote out of gas — the tripwire
+# was right.
 #
 # Re-measure with `npx hardhat run script/gas-report.js` (local) or eth_estimateGas
 # (live) before changing any of these. test/gas.test.js fails if a limit drops below
@@ -196,6 +199,10 @@ class PairConfig:
         market_id: int,
         symbol: Optional[str] = None,
         expiry_block: Optional[int] = None,
+        price_source: Optional[str] = None,
+        price_symbol: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        fx_quote_per_usd: Optional[float] = None,
     ) -> None:
         self.base_token = base_token
         self.quote_token = quote_token
@@ -203,6 +210,12 @@ class PairConfig:
         self.market_id = int(market_id)
         self.symbol = symbol or base_token[:10]
         self.expiry_block = int(expiry_block) if expiry_block is not None else None
+        # Real-price-feed descriptors (docs/design/bot-real-price-feed-spec.md §6.1).
+        # Absent/None => the legacy synthetic walk (build_feed handles it).
+        self.price_source = price_source
+        self.price_symbol = price_symbol
+        self.asset_class = asset_class
+        self.fx_quote_per_usd = fx_quote_per_usd
 
 
 class BotContext:
@@ -308,6 +321,10 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
                 market_id=int(a.get("marketId", "0")),
                 symbol=a.get("symbol"),
                 expiry_block=a.get("expiryBlock"),
+                price_source=a.get("priceSource"),
+                price_symbol=a.get("priceSymbol"),
+                asset_class=a.get("assetClass"),
+                fx_quote_per_usd=a.get("fxQuotePerUsd"),
             )
         )
     return shared, pairs
@@ -346,24 +363,6 @@ def resolve_pairs(explicit: Optional[str] = None) -> tuple[dict, list[PairConfig
     return {}, [load_env_pair()]
 
 
-class PriceFeed:
-    """Fair-price source. Demo: a bounded random walk around the configured base price
-    so the quoted (canonical) price visibly moves. Swap `get()` for a real feed in prod.
-    Jitter band is `PRICE_JITTER_BPS` (default 300 = ±3%), clamped to ±20% of the base."""
-
-    def __init__(self, fair_price: int):
-        self.fair = int(fair_price)
-        self.current = int(fair_price)
-        self.jitter = int(os.getenv("PRICE_JITTER_BPS", "300")) / 10_000
-
-    def get(self, _block: int) -> int:
-        if self.jitter > 0:
-            self.current = int(self.current * (1 + random.uniform(-self.jitter, self.jitter)))
-            lo, hi = int(self.fair * 0.8), int(self.fair * 1.2)
-            self.current = max(lo, min(hi, self.current))
-        return self.current
-
-
 class MarketMakerBot:
     """Market maker for ONE pair. Chain resources come from a shared
     `BotContext`; pair-specific state (tokens, market id, own quotes, withdrawn
@@ -390,7 +389,7 @@ class MarketMakerBot:
         self.symbol = pair.symbol
         self.base_token = Web3.to_checksum_address(pair.base_token)
         self.quote_token = Web3.to_checksum_address(pair.quote_token)
-        self.feed = PriceFeed(pair.fair_price)
+        self.feed = build_feed(pair, logger=log)
         self.expiry_hint = pair.expiry_block
 
         self.market_id = pair.market_id
@@ -740,7 +739,7 @@ class MarketMakerBot:
         label: str,
         fair: Optional[int] = None,
         track_own: bool = True,
-    ) -> int:
+    ) -> Optional[int]:
         """Submit one collateralized quote.
 
         `fair` lets a caller price several quotes from ONE feed read: the final trading
@@ -757,7 +756,13 @@ class MarketMakerBot:
                 f"({max_expiry}); upstream Monoracle would revert ExpiryTooFar"
             )
         if fair is None:
-            fair = self.feed.get(block)
+            try:
+                fair = self.feed.get(block)
+            except FeedOutageError as e:
+                # Outage policy=halt: a possibly-15x-off seed mark is instantly veto-
+                # arbitrated. Refuse to quote; the loop retries next tick.
+                log.error("[%s] %s — NOT quoting this tick", self.symbol, e)
+                return None
         quote_amount = self.quote_base * fair // E18
         qid_before = self.oracle.functions.nextQuoteId().call()
         receipt = self._send(
@@ -867,15 +872,25 @@ class MarketMakerBot:
             if q["status"] not in (VETOED_UNDERPRICED, VETOED_OVERPRICED):
                 continue
             base_amt, quote_amt = q["baseAmount"], q["quoteAmount"]
-            fair = self.feed.get(decision_block)
+            try:
+                fair = self.feed.get(decision_block)
+            except FeedOutageError as e:
+                # Feed outage: withdrawal itself does not depend on the mark,
+                # withdraw anyway but report PnL as unavailable (no seed guess).
+                log.error("[%s] %s — PnL unavailable for q%s (withdrawing anyway)", self.symbol, e, qid)
+                fair = None
             if q["status"] == VETOED_UNDERPRICED:
                 # we keep 2x quote, lose base
-                pnl_hkd = quote_amt - base_amt * fair // E18
                 side = "UNDERPRICED (trader went LONG)"
             else:
                 # we keep 2x base, lose quote
-                pnl_hkd = base_amt * fair // E18 - quote_amt
                 side = "OVERPRICED (trader went SHORT)"
+            if fair is None:
+                pnl_hkd = None
+            elif q["status"] == VETOED_UNDERPRICED:
+                pnl_hkd = quote_amt - base_amt * fair // E18
+            else:
+                pnl_hkd = base_amt * fair // E18 - quote_amt
             self._send(
                 self.oracle.functions.withdrawProviderFunds(qid), GAS["withdraw"], f"withdraw q{qid}",
                 decision_block=decision_block, decision_ts=decision_ts,
@@ -884,7 +899,10 @@ class MarketMakerBot:
             self._pending_own.discard(qid)
             log.warning(
                 "[%s] VETO q%s %s | pnl≈%s HKD (base %s, quote %s, fair %s)",
-                self.symbol, qid, side, pnl_hkd / E18, base_amt / E18, quote_amt / E18, fair,
+                self.symbol, qid, side,
+                "N/A" if pnl_hkd is None else pnl_hkd / E18,
+                base_amt / E18, quote_amt / E18,
+                "N/A" if fair is None else fair,
             )
 
     def settle_round(self, round_expiry: int) -> None:
@@ -1141,7 +1159,14 @@ class MarketMakerBot:
                 # settlement quote vetoed during the window falls back to an identical
                 # canonical price. The settlement quote's expiry is E+G, so a delayed
                 # inclusion can no longer revert ExpiryMustBeFuture (#22).
-                fair = self.feed.get(block)
+                try:
+                    fair = self.feed.get(block)
+                except FeedOutageError as e:
+                    # Same contract as submit_quote: refuse to quote this tick
+                    # (the loop retries) instead of surfacing as a generic
+                    # "step failed" warning.
+                    log.error("[%s] %s — NOT quoting this tick", self.symbol, e)
+                    return
                 if active is None:
                     self.submit_quote(expiry, "final trading quote", fair=fair)
                 self._settlement_quote_id = self.submit_quote(

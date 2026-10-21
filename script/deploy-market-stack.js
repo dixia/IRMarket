@@ -51,7 +51,27 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45";
+const ASSETS_RAW = process.env.ASSETS || "NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514";
+
+// Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
+// price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
+const FEED_DESCRIPTORS = {
+  NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
+  SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
+  SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
+  GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
+  DEEPSEEK: { priceSource: "synthetic" },
+  // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless
+  // priceSymbol pins one with `@region` — not exercised by any default entry;
+  // set e.g. priceSymbol: "B300@us-central1" to pin). Opt-in via
+  // ASSETS=B300:<fair> — no token/market exists for these by default.
+  B300: { priceSource: "nebius", priceSymbol: "B300", assetClass: "gpu" },
+  B200: { priceSource: "nebius", priceSymbol: "B200", assetClass: "gpu" },
+  H200: { priceSource: "nebius", priceSymbol: "H200", assetClass: "gpu" },
+  H100: { priceSource: "nebius", priceSymbol: "H100", assetClass: "gpu" },
+  "RTX PRO 6000": { priceSource: "nebius", priceSymbol: "RTX PRO 6000", assetClass: "gpu" },
+};
+const feedDescriptor = (symbol) => FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
 
 const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS;
 if (!ORACLE_ADDRESS) {
@@ -153,6 +173,17 @@ async function main() {
   // reuse decisions
   const reuseQuote = !FRESH_TOKENS && registry?.quoteToken && ethers.isAddress(registry.quoteToken) ? registry.quoteToken : undefined;
   const bySymbol = new Map((registry?.assets || []).map((a) => [a.symbol, a]));
+
+  // deployment-assets.json is REWRITTEN wholesale from ASSETS at the end of this script,
+  // so a symbol present in the current registry but absent from ASSETS is silently
+  // dropped (losing its token/market links). Surface that instead of shrinking quietly.
+  const dropped = [...bySymbol.keys()].filter((s) => !assets.some((a) => a.symbol === s));
+  if (dropped.length) {
+    console.warn(
+      `WARNING: ASSETS omits registry symbol(s) ${dropped.join(", ")} — they will be DROPPED ` +
+        "from deployment-assets.json. Add them to ASSETS to keep them."
+    );
+  }
 
   // wrapper reuse: only if the existing wrapper is bound to this exact oracle
   // (FRESH_WRAPPER=1 / --fresh-wrapper: deploy new, same-oracle rebuild — see header).
@@ -286,6 +317,7 @@ async function main() {
       fairPrice: asset.fairPrice.toString(),
       marketId,
       expiryBlock: expiryBlock.toString(),
+      ...feedDescriptor(asset.symbol),
     });
   }
 

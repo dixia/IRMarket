@@ -26,6 +26,19 @@ jobs:
       - name: Tests
         run: npx hardhat test
 
+  bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The feed parsers/tests are stdlib-only (no web3/requests needed).
+      - name: Compile
+        run: python -m py_compile bot/price_feed.py bot/verifier.py
+      - name: Tests
+        run: python -m unittest discover -s bot/tests -v
+
   web:
     runs-on: ubuntu-latest
     steps:

@@ -24,11 +24,16 @@ _Tracking convention: this file is only an index — each item references a GH i
 - Plan: `docs/plan/one-market-per-pair-plan.md`
 - Status: **TODO** — plan complete (**Not started**); implementation pending.
 
-## Merge the real price-feed change (`feat/real-price-feed` → `feat/monoracle-upstream`)
+## Merge the real price-feed change (`feat/real-price-feed` → `main`)
 
 - GH: https://github.com/dixia/IRMarket/issues/13
 - Spec: `docs/design/bot-real-price-feed-spec.md` (in the `IRMarket-pricefeed` worktree)
-- Status: **DONE (branch level)** — the real-feed work is committed on `feat/real-price-feed` and now merged with `main` (settlement window E+G, wrapper trade gate, bounded bookkeeping and the `[latency]` instrumentation preserved; the inline synthetic `PriceFeed` class replaced by `bot/price_feed.py`). Hardhat 64/64. Pushed; promotion to `main` awaits review.
+- Status: **PR #21 open, MERGEABLE — all checks green; ready to merge.** 11 commits on `feat/real-price-feed` (spec, feed module + wiring, SOXX/descriptors, test marker, outage-halt fix, main merges, Nebius GPU feed from #28, retry throttle + step guard, CI/nits). All review items closed: outage halt policy, retry throttle (1 attempt/TTL), throttled-tick log spam, malformed-row robustness, CI `bot` job (green), Nasdaq market-status logging, nits. Bot suite 54/54; `contracts`/`web`/Vercel green. Remaining: the merge itself. (The `feat/monoracle-upstream` base named in the issue does not exist on the remote; base is `main`.)
+
+## Nebius spot GPU price feed (research + impl)
+
+- GH: https://github.com/dixia/IRMarket/issues/28
+- Status: **DONE** — `NebiusSource` (unauthenticated `api.nebius.cloud/billing/v1alpha1/spot-price`, lowest-across-regions or `@region` pin, USD/GPU-hour) implemented on `feat/real-price-feed` (commit `9448a95`, part of PR #21); live-verified against nebius.com/spot-prices; 46/46 tests. Issue closed; merges with PR #21.
 
 ## Pilot Envio HyperIndex/HyperSync for web + bot on-chain data layer
 
