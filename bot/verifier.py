@@ -128,7 +128,7 @@ MULTICALL3_ABI = [
 #
 #   op             live cold   mock first    adopted
 #   approve            33,586       47,242      56,691
-#   submit_quote      287,219      292,944     315,413
+#   submit_quote      287,219      288,190     346,000  (lazy-settlement mock)
 #   settle             48,192       65,429      72,956
 #   withdraw          123,206      123,206     150,000
 #   create_market     172,678      198,542     218,789
@@ -153,7 +153,7 @@ MULTICALL3_ABI = [
 # limit can be bumped in production without a code change.
 GAS_DEFAULTS = {
     "approve": 56_691,
-    "submit_quote": 315_413,
+    "submit_quote": 346_000,
     "settle": 72_956,
     "withdraw": 150_000,
     "create_market": 218_789,
