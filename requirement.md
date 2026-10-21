@@ -157,7 +157,7 @@
 ## 10. Monoracle Integration Notes
 
 - Settlement relies on the existing Monoracle veto-arbitrage primitive for any priced asset.
-- **Monoracle testnet contract (10143):** `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` — current upstream deployment with lazy/implicit settlement (a quote is canonical once `block.number > expiryBlock`; `settleValidQuote` is an optional checkpoint). Previous deployment `0x151286e6Ca5F5CA20910dE90C0DCEAa9fd71f2c8` stays live and untouched.
+- **Monoracle testnet contract (10143):** lazy/implicit deployment `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` (a quote is canonical once `block.number > expiryBlock`; `settleValidQuote` is an optional checkpoint). IRMarket's production wrapper/vault still bind the pre-lazy deployment `0x807321100748d75a618e508de214123CB77C9f4D` until the ops re-point; the older `0x151286e6Ca5F5CA20910dE90C0DCEAa9fd71f2c8` / `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0` deployments stay live and untouched.
 - Monoracle contract source is **not vendored** — referenced from the upstream repo
   (`github.com/dixia/monoracle`, `contracts/Monoracle.sol`). Only the ABI is copied here
   (`abi/Monoracle.abi.json`).

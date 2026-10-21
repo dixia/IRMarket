@@ -173,7 +173,7 @@ src/
 NEXT_PUBLIC_RPC_URL=https://testnet-rpc.monad.xyz
 NEXT_PUBLIC_CHAIN_ID=10143
 NEXT_PUBLIC_ORACLE_ADDRESS=0x...            # Monoracle (IRMarket-deployed fork — NOT
-                                            # upstream 0x1ABABc60... whose window is fixed 2 slots)
+                                            # upstream lazy settlement 0x0BC36e1a...)
 NEXT_PUBLIC_MARKET_ADDRESS=0x...            # IRMarket wrapper (openLong/openShort)
 NEXT_PUBLIC_BASE_TOKEN=0x...                # LLM
 NEXT_PUBLIC_QUOTE_TOKEN=0x...               # HKD

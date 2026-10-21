@@ -443,7 +443,8 @@ when a quote settles (B12).
 ## 10. Deployment
 
 - Deploy `Monoracle` (own instance — the trading venue; upstream's live testnet
-  deployment `0x1ABABc60...` is **not** used, its window is fixed 2 slots) then
+  deployment `0x0BC36e1a...` is **not** used directly, IRMarket consumes an upstream
+  build with per-quote `expiryBlock`) then
   `IRMarket(oracle)` via `script/deploy.js` — one run also mints `LLM`/`HKD` (`MockERC20`)
   and `createMarket`s the demo round; it writes `deployment.json` (oracle/market/tokens,
   `marketId`, `feeBps`, `expiryBlock`, tx-hashes) and prints the env lines to wire into
@@ -486,7 +487,7 @@ when a quote settles (B12).
   the deployed V0.9 venue.
 - **ABI:** `abi/Monoracle.abi.json` (regenerated from the fork build — `submitQuote` now
   takes `expiryBlock`, `QuoteSubmitted` carries it, no `VERIFICATION_SLOTS`).
-- **Upstream live testnet (10143):** `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0` —
+- **Upstream live testnet (10143):** `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` —
   informational only; IRMarket deploys its own instance.
 - Semantics preserved from upstream:
   - `submitQuote(base, quote, baseAmount, quoteAmount, expiryBlock)` →
