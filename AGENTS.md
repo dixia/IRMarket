@@ -68,6 +68,13 @@ Monad veto-arbitrage 长/短市场：
 - 仓库文件禁写本机绝对路径（`C:\Users\iamh4\…`），统一用 `github.com/dixia/…` 引用。
 - 不自动 push，用户明确要求才 push。
 
+### Merge flow (protected `main`)
+- `main` 受保护：禁止直推；每个改动走 PR，必需检查 `contracts` / `web` / `bot`，且分支必须与 `main` 同步（strict）。
+- 合并方式只有 **squash**；合并后自动删分支。`gh pr merge <n> --auto --squash`。
+- 一次只合一个 PR；其余分支在每次合并后 rebase 到新 `main`。冲突在 **feature 分支** 解决，勿在 `main` 上解决。
+- 不把长期 staging 分支合进 `main`（staging 分支 ≠ staging 环境；registry 共享且上链）。
+- 完整流程与回滚/发布约定：`docs/workflows/git-merge-procedure.md`。
+
 ### Long-running commands (agent session hygiene)
 - 预计 **> ~60–90s** 的命令（playwright/e2e/视频套件、`next build`、`hardhat test`、合约部署、Vercel build）**禁止用单次前台 tool call 挂满大 timeout**：会话表现为"卡死"，协作者只能手动催。
 - 正确姿势：`Start-Process … -WindowStyle Hidden -RedirectStandardOutput/-RedirectStandardError <log>` 后台化跑，然后**短轮询**（每次 sleep 2–5s，一次 ≤ ~90s）读日志文件判断进度/完成，并在轮询之间向协作者播报中间状态；完成后再做收尾。
