@@ -211,21 +211,40 @@ NEXT_PUBLIC_EXPIRY_SECONDS=180              # 3-min default round cadence
 ### 4.2 Tradeable quotes & countdown (HTTP polling)
 
 - For a market, track ACTIVE quotes of the pair: `useQuotes` reads a **trailing window** of
-  `quotes()` (`nextQuoteId − 200 … nextQuoteId`), 4s poll; keep only `status == ACTIVE` with
-  `block.number <= expiryBlock` (vetoable). No WS — pure HTTP (see §7.4). The 200-quote cap is
-  a demo sanity bound (bot rolls ~600-block rounds; a couple rounds fit comfortably).
+  `quotes()` (`nextQuoteId − 50 … nextQuoteId`), 4s poll; keep only `status == ACTIVE` with
+  `block.number <= expiryBlock` (vetoable). No WS — pure HTTP (see §7.4). The 50-quote cap is
+  a demo sanity bound (rounds are ~15 min / 3000 blocks).
+- **Round model — one market per pair (implemented, #20):** the wrapper keeps **ONE
+  long-lived `Market` per pair**. The market's own `expiryBlock` is **inert** — `openLong`
+  validates the **QUOTE's** expiry — so trading **rounds are quote `expiryBlock`s**:
+  - `useRounds(pair?)` groups decoded quotes (`useQuotes`, trailing `MAX_TRACKED_QUOTES = 50`
+    ids) by `expiryBlock`; `live = expiry >= block`; returns `{rounds, active, activeExpiry}`
+    with live rounds soonest-first and past rounds newest-first.
+  - `useMarkets` dedups to **one trade-target market per pair** (newest `marketId` — the
+    fee/MM holder for `openLong`); `marketId`/`marketMaker`/`feeBps` remain the trade target.
+  - `useMarketGroups` derives `active`/`activeRounds` from `useRounds` (quote expiries), not
+    `market.expiryBlock`; `latest` stays the "awaiting next round" fallback.
+  - **Every countdown** (market cards, `/trade` header) uses the active/selected round's
+    quote expiry; the trade page's round selector (`?r=<expiryBlock>`) lists live rounds
+    (soonest first) and past rounds (newest first).
+  - `createMarket` is **deploy-owned** (created/reused once per pair); the bot never creates
+    markets in its loop. Bot rounds are derived from quotes (`round = max live expiry across
+    providers`, else `block + ROUND_BLOCKS`).
+  - **Regression guards:** never source a round/countdown from `market.expiryBlock` (bot
+    `test_rounds.py` + e2e cover this); the 50-quote window bounds visible round history
+    (raise it or index events if longer history is needed).
 - **Default tradeable quote = newest ACTIVE quote (Q3-A):** with D-13 the whole round is
   vetoable and the bot restocks, so several ACTIVE quotes may coexist (possibly different
   prices/sizes as the market moves). The UI shows/executes the **newest** one; older ACTIVE
   quotes are not offered by default (arbitrage on stale quotes is intentional, but kept out of
   the default path).
-- **Countdown is market-level** (D-13): the round's `expiryBlock` → block→time conversion off
-  `useCurrentBlock` (300ms blocks). `formatCountdown` renders `Xm Ys` / "Expired" (V0.9.2:
-  English wording — see `ui_copy.md`).
+- **Countdown is round-level** (D-13): the selected round's QUOTE `expiryBlock` → block→time
+  conversion off `useCurrentBlock` (300ms blocks). `formatCountdown` renders `Xm Ys` / "Expired"
+  (V0.9.2: English wording — see `ui_copy.md`).
 - Degraded states:
   - **No tradeable quote:** no ACTIVE quote in window (bot off / collateral rolling, B4) →
     trade panel disabled with that message.
-  - **Market expired / no placement:** after `expiryBlock`, no new vetoes for the round.
+  - **Round expired / no placement:** after the round's `expiryBlock`, no new vetoes for the round.
 
 ### 4.3 Reference price & mid-round marks (B12)
 

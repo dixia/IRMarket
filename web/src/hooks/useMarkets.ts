@@ -32,7 +32,10 @@ const MARKET_CREATED_EVENT = IRMARKET_ABI.find(
 ) as AbiEvent;
 const MARKET_LOOKBACK_BLOCKS = 14_000n;
 
-/** Markets: whitelist-filtered event scan when curated; legacy full enumeration otherwise. */
+/** Markets: ONE trade-target market per pair (newest marketId) — under
+ *  one-market-per-pair the market is the pair's target, not a round; trading rounds come
+ *  from `useRounds` (quote expiryBlock). Whitelist-filtered event scan when curated;
+ *  legacy full enumeration otherwise. */
 export function useMarkets(): MarketWithMeta[] {
   const publicClient = usePublicClient();
   const blockNumber = useCurrentBlock();
@@ -184,17 +187,20 @@ export function useMarkets(): MarketWithMeta[] {
     const set = new Set(SELECTED_BASE_TOKENS);
     return enriched.filter((m) => set.has(m.baseToken.toLowerCase()));
   }, [enriched]);
-  // Sort so markets still in their quote window come first (soonest-expiring first), then
-  // expired ones last. A market is "active" while its expiryBlock is still ahead of now.
-  const sorted = useMemo(() => {
-    if (blockNumber === undefined) return curated;
-    return [...curated].sort((a, b) => {
-      const aActive = a.expiryBlock > blockNumber ? 0 : 1;
-      const bActive = b.expiryBlock > blockNumber ? 0 : 1;
-      if (aActive !== bActive) return aActive - bActive;
-      return a.expiryBlock < b.expiryBlock ? -1 : a.expiryBlock > b.expiryBlock ? 1 : 0;
-    });
-  }, [curated, blockNumber]);
+  // One-market-per-pair (docs/web-tech-design.md §4.2): markets are the PAIR
+  // TRADE TARGET (openLong needs marketId + feeBps/marketMaker; pair/MM/fee never change),
+  // NOT rounds — trading rounds come from useRounds (quote expiryBlock). Dedup to the
+  // newest market per pair. `markets()` still enumerates every id (the wrapper has no
+  // pair→id lookup) but under Option B nextMarketId freezes at ~#pairs.
+  const deduped = useMemo(() => {
+    const byPair = new Map<string, MarketWithMeta>();
+    for (const m of curated) {
+      const key = `${m.baseToken.toLowerCase()}/${m.quoteToken.toLowerCase()}`;
+      const cur = byPair.get(key);
+      if (!cur || m.marketId > cur.marketId) byPair.set(key, m);
+    }
+    return [...byPair.values()];
+  }, [curated]);
 
-  return sorted;
+  return deduped;
 }

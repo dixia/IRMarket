@@ -1,11 +1,23 @@
 """IRMarket market-maker & settlement bot (Monad testnet).
 
 Implements bot/prd.md FR-BOT-001..004 on the V0.9 Veto-Market design
-(docs/sc-tech-spec.md §5.1/§8.2):
+(docs/sc-tech-spec.md §5.1/§8.2), under the ONE-MARKET-PER-PAIR model
+(docs/sc-tech-spec.md): a **round is defined by the QUOTE's
+`expiryBlock`**, never by the wrapper market's (that field is inert — `openLong`
+validates only the quote's pair/ACTIVE/expiry). The bot therefore NEVER creates
+markets in its loop: the deploy script owns the pair's single long-lived market,
+and a new round simply starts at `block + ROUND_BLOCKS`.
 
   - Quoting loop (FR-BOT-001): keep one ACTIVE quote per round at the tracked fair
-    price (per-quote expiryBlock = the market's expiryBlock, D-13). Re-quote
-    (restock) immediately whenever our quote is vetoed.
+    price (per-quote expiryBlock = the round expiry). Re-quote (restock)
+    immediately whenever our quote is vetoed.
+  - Round model: on startup the current round is adopted from live quotes (ours
+    first, else a full-ledger scan for another provider's round); when it expires
+    we settle it and start the next at `block + ROUND_BLOCKS`. No `createMarket`
+    (the optional AUTO_CREATE_MARKET one-shot ensure, default OFF, only heals a
+    missing market at startup).
+  - Settlement quote (FR-BOT-002): SETTLEMENT_QUOTE_LEAD_BLOCKS before expiry,
+    read the fair price once and submit (a) a final TRADING quote (expiry E) and
   - Settlement quote (FR-BOT-002): SETTLEMENT_QUOTE_LEAD_BLOCKS before expiry,
     read the fair price once and submit (a) a final TRADING quote (expiry E) and
     (b) the final SETTLEMENT quote (expiry E + SETTLEMENT_WINDOW_BLOCKS). (b) is
@@ -15,8 +27,8 @@ Implements bot/prd.md FR-BOT-001..004 on the V0.9 Veto-Market design
   - Auto-settle (FR-BOT-003): inside the settlement window [E, E+G], checkpoint the
     round's own ACTIVE quotes once (an OPTIONAL checkpoint under lazy settlement —
     the canonical price is already fixed at read time, order-independent); after
-    E+G checkpoint the settlement quote, then withdraw our funds.
-    Optionally create the next round's market and keep quoting (AUTO_CREATE_MARKET).
+    E+G checkpoint the settlement quote, then withdraw our funds and start the next
+    round at block + ROUND_BLOCKS (one long-lived market per pair — no createMarket).
   - Veto watch (FR-BOT-004): detect vetoes on our quotes, withdraw the 2x
     other-side return, log provider P&L.
 
@@ -435,8 +447,10 @@ class MarketMakerBot:
         # the final TRADING quote (expiry E) settles ~1 block after E and already
         # carries the round mark.
         self.settlement_window_blocks = int(os.getenv("SETTLEMENT_WINDOW_BLOCKS", "60"))
-        self.round_blocks = int(os.getenv("ROUND_BLOCKS", "6000"))  # ~30 min @300ms
-        self.auto_create = os.getenv("AUTO_CREATE_MARKET", "1") == "1"
+        self.round_blocks = int(os.getenv("ROUND_BLOCKS", "3000"))  # 15 min @300ms (one-market-per-pair D4)
+        # OPTIONAL one-shot ensure (default OFF — the deploy script owns the single
+        # long-lived market per pair). Must NEVER run per round.
+        self.auto_create = os.getenv("AUTO_CREATE_MARKET", "0") == "1"
         # Demo: re-quote every loop (even with an active quote) so the canonical price
         # keeps moving; off by default (production holds one active quote per round).
         self.requote = os.getenv("REQUOTE_EVERY_LOOP", "0") == "1"
@@ -452,9 +466,13 @@ class MarketMakerBot:
         # `_final_submitted`: `is None` is the "not submitted yet" gate (step, restart
         # recovery) and the id itself is the handle `settle_settlement_quote` needs.
         self._settlement_quote_id: Optional[int] = None
+        # Current round expiry (quote-expiry model, docs/sc-tech-spec.md):
+        # a round is the quote expiryBlock, NOT the (inert) wrapper market expiry. Derived
+        # from live quotes on startup, then advanced by `_start_round` — never createMarket.
+        self._round_expiry: Optional[int] = None
         # The trading-quote (expiry E) settle/withdraw pass runs ONCE per round — the
         # settlement window spans G blocks and the loop revisits it, and settling twice
-        # would burn gas (and re-log) for nothing. Reset by roll_round.
+        # would burn gas (and re-log) for nothing. Reset by _set_round/_start_round.
         self._round_swept = False
         # Head / expiry remembered by the last step(); the drivers derive their adaptive
         # sleep from these, so a fast poll near expiry costs no extra RPC per loop.
@@ -763,6 +781,135 @@ class MarketMakerBot:
                 consecutive_strangers += 1
                 if consecutive_strangers >= 20:
                     break
+
+    # ------------------------------------------------ round = quote expiry (D4)
+    #
+    # One-market-per-pair: the wrapper market has no meaningful expiry (openLong
+    # validates the QUOTE's pair/ACTIVE/expiry), so a round is the quote expiryBlock.
+    # We derive it from live quotes once (startup) and then advance it ourselves; we
+    # never create a market per round.
+
+    def _is_pair(self, q: dict) -> bool:
+        return (
+            q["baseToken"].lower() == self.base_token.lower()
+            and q["quoteToken"].lower() == self.quote_token.lower()
+        )
+
+    def _round_of_expiry(self, expiry: int, block: int) -> int:
+        """Map a live quote expiry to its round expiry.
+
+        Our own round writes TWO quotes: the final trading quote (expiry E) and the
+        settlement quote (expiry E+G). A live quote whose expiry is within G of the
+        head can therefore only be a settlement quote, so its round is expiry - G.
+        Trading quotes carry ~ROUND_BLOCKS left, far above G. (Assumes
+        ROUND_BLOCKS > G, enforced by the defaults 3000 > 60.)"""
+        if expiry - block <= self.settlement_window_blocks:
+            return expiry - self.settlement_window_blocks
+        return expiry
+
+    def _set_round(self, expiry: Optional[int]) -> None:
+        if expiry == self._round_expiry:
+            return
+        log.info(
+            "[%s] round -> %s", self.symbol,
+            expiry if expiry is not None else "(none — will start a new one)",
+        )
+        self._round_expiry = expiry
+        # Per-round state belongs to the round that just ended.
+        self._settlement_quote_id = None
+        self._round_swept = False
+
+    def _sync_round(self, block: int) -> None:
+        """Adopt the live round (startup only): the max round expiry among OUR live
+        quotes; if we hold none, fall back to a full-ledger scan to adopt another
+        provider's round instead of starting a parallel one. Leaves None when nobody
+        has a live round (the caller starts a fresh one)."""
+        latest_own = None
+        # Any own quote still alive in the future defines the round we serve — ACTIVE,
+        # or VETOED (we restock it in the same round), or SETTLED (the round lives until
+        # its expiry). `_pending_own` holds the non-ACTIVE ones.
+        for qid in self._own_current | self._pending_own:
+            q = self._quote_cached(qid)
+            if q["expiryBlock"] < block:
+                continue
+            round_expiry = self._round_of_expiry(q["expiryBlock"], block)
+            if latest_own is None or round_expiry > latest_own:
+                latest_own = round_expiry
+        if latest_own is not None:
+            self._set_round(latest_own)
+            return
+        adopted = self._latest_live_round_expiry(block)
+        if adopted is not None:
+            log.info("[%s] adopting live round expiry=%s (ledger scan)", self.symbol, adopted)
+            self._set_round(adopted)
+            return
+        self._set_round(None)
+
+    def _latest_live_round_expiry(self, block: int) -> Optional[int]:
+        """Max live round expiry for this pair across ALL providers (full scan; only
+        called when we hold no live quote of our own, so the cost is rare)."""
+        next_id = self.oracle.functions.nextQuoteId().call()
+        latest = None
+        for qid in range(1, next_id):
+            q = self._quote(qid)
+            if q["status"] != ACTIVE or q["expiryBlock"] < block or not self._is_pair(q):
+                continue
+            round_expiry = self._round_of_expiry(q["expiryBlock"], block)
+            if latest is None or round_expiry > latest:
+                latest = round_expiry
+        return latest
+
+    def _start_round(self, block: int) -> int:
+        """Start the next round at block + ROUND_BLOCKS. No createMarket: the deploy
+        script owns the pair's single long-lived market."""
+        expiry = block + self.round_blocks
+        log.info("[%s] NEW ROUND expiry=%s (+%s blocks, no createMarket)", self.symbol, expiry, self.round_blocks)
+        self._set_round(expiry)
+        return expiry
+
+    def ensure_market(self) -> None:
+        """OPTIONAL one-shot ensure (AUTO_CREATE_MARKET, default OFF): create the pair's
+        single long-lived market if the configured marketId holds nothing on this
+        wrapper. The deploy script owns market creation in the normal flow
+        (docs/sc-tech-spec.md) — this is a self-healing fallback
+        and must never run per round."""
+        if not self.auto_create:
+            return
+        exists = False
+        if self.market_id > 0:
+            try:
+                m = self._market()
+                base_t, quote_t = m[0], m[1]
+                exists = base_t != "0x0000000000000000000000000000000000000000" and (
+                    base_t.lower() == self.base_token.lower()
+                    and quote_t.lower() == self.quote_token.lower()
+                )
+            except Exception:
+                exists = False
+        if exists:
+            return
+        block = self.w3.eth.block_number
+        expiry_block = block + self.round_blocks
+        fee_bps = int(os.getenv("FEE_BPS", "100"))
+        decision_ts = time.time()
+        receipt = self._send(
+            self.market.functions.createMarket(
+                self.base_token, self.quote_token, self.address, expiry_block, fee_bps
+            ),
+            GAS["create_market"],
+            "createMarket (one-shot ensure)",
+            decision_block=block,
+            decision_ts=decision_ts,
+        )
+        mid = self._market_created_id(receipt)
+        if mid is None:
+            raise RuntimeError("createMarket: MarketCreated event not found")
+        self.market_id = mid
+        log.warning(
+            "[%s] created missing marketId=%s (one-shot ensure) — registry/web env "
+            "should be updated by the deployer",
+            self.symbol, mid,
+        )
 
     def _active_own_quote(self, round_expiry: int) -> Optional[int]:
         """Our newest ACTIVE quote for THIS round (expiryBlock == market expiry), if any.
@@ -1086,41 +1233,6 @@ class MarketMakerBot:
             "[%s] settlement quote q%s closed: canonical price=%s", self.symbol, qid, price[0],
         )
 
-    def roll_round(self, current_expiry: int) -> int:
-        """Create the next round's market (bot as marketMaker) and continue quoting."""
-        if not self.auto_create:
-            log.warning(
-                "[%s] round %s expired — AUTO_CREATE_MARKET off, exiting round",
-                self.symbol, self.market_id,
-            )
-            return self.market_id
-        decision_ts = time.time()  # checkpoint 0: head read (for the [latency] line)
-        block = self.w3.eth.block_number
-        new_expiry = block + self.round_blocks
-        fee_bps = int(os.getenv("FEE_BPS", "100"))
-        receipt = self._send(
-            self.market.functions.createMarket(
-                self.base_token, self.quote_token, self.address, new_expiry, fee_bps
-            ),
-            GAS["create_market"],
-            "createMarket (next round)",
-            decision_block=block,
-            decision_ts=decision_ts,
-        )
-        mid = self._market_created_id(receipt)
-        if mid is None:
-            raise RuntimeError("createMarket: MarketCreated event not found")
-        log.warning(
-            "[%s] NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — update web/.env.local NEXT_PUBLIC_DEMO_MARKET_ID=%s",
-            self.symbol, mid, new_expiry, current_expiry, mid,
-        )
-        self.market_id = mid
-        # Per-round state reset for the new round: the settlement quote id and the
-        # E-quote sweep flag belong to the round that just closed.
-        self._settlement_quote_id = None
-        self._round_swept = False
-        return mid
-
     def _market_created_id(self, receipt) -> Optional[int]:
         """Extract the indexed marketId from MarketCreated (topic1), oracle-free."""
         from eth_utils import event_signature_to_log_topic
@@ -1142,7 +1254,13 @@ class MarketMakerBot:
         """One iteration of the quoting loop for THIS pair (no sleep). Split out
         from `run` so the multi-pair driver can advance every pair in turn.
 
-        Three phases, keyed off the market expiry E and the settlement window G
+        ONE-MARKET-PER-PAIR (docs/sc-tech-spec.md): the wrapper market
+        is the pair's long-lived trade target and its `expiryBlock` is inert — a round is
+        defined by the QUOTE's `expiryBlock`. The round is derived from live quotes on
+        startup (adopting another provider's round when we hold none) and then advanced
+        by `_start_round`; this loop NEVER calls createMarket.
+
+        Three phases, keyed off the round expiry E and the settlement window G
         (plan §3):
           NORMAL            head < E           veto watch; restock (expiry E) while
                                                 E-head > lead; at E-head <= lead read
@@ -1160,7 +1278,8 @@ class MarketMakerBot:
                                                 ExpiryMustBeFuture), no roll.
           FINALIZE          head > E+G         E-quote pass if not yet done, then settle
                                                 the E+G quote LAST (canonical mark),
-                                                withdraw it, roll the next round.
+                                                withdraw it, start the next round
+                                                (no createMarket).
 
         No per-step rescan: forward progress is driven by the receipt id
         (`_resolve_own_quote` verifies it once per submit); the bounded recover-scan runs
@@ -1172,22 +1291,45 @@ class MarketMakerBot:
             market = self._market()
         else:
             market = snapshot
-        base_t, quote_t, _mm, fee_bps, expiry, _created = market
+        base_t, quote_t, _mm, fee_bps, _market_expiry, _created = market
         if base_t.lower() != self.base_token.lower() or quote_t.lower() != self.quote_token.lower():
             raise RuntimeError(f"[{self.symbol}] market {self.market_id} pair mismatch")
         block = self.w3.eth.block_number
-        # Remembered for the drivers' adaptive loop period — a fast poll near expiry
-        # must not cost an extra RPC per loop.
-        self._last_head = block
-        self._last_expiry = expiry
 
+        # Round = quote expiry (one-market-per-pair). Derived on startup — adopting a
+        # live round when one exists — then advanced only by `_start_round`.
         if not self._booted:
-            self._rescan_own_quotes(expiry)
+            if self._round_expiry is None:
+                self._sync_round(block)  # own ids are empty yet -> full-ledger adopt
+            # round_expiry=0 when nothing is live: skip settlement-quote classification
+            # and recover every unfinished own quote (they are settled below).
+            self._rescan_own_quotes(self._round_expiry or 0)
             self._booted = True
             log.debug(
                 "[%s] recover-scan: %s current / %s pending after %s reads",
                 self.symbol, len(self._own_current), len(self._pending_own), self._read_count,
             )
+        if self._round_expiry is None:
+            self._sync_round(block)
+            if self._round_expiry is None:
+                # Nothing live anywhere: settle our own expired rounds first (recovery),
+                # then start a fresh round — no createMarket (the deploy script owns the
+                # pair's single long-lived market).
+                stale = sorted({
+                    q["expiryBlock"]
+                    for qid in self._own_current
+                    if (q := self._quote_cached(qid))["status"] == ACTIVE and q["expiryBlock"] < block
+                })
+                for expired in stale:
+                    self.settle_round(expired)
+                self._start_round(block)
+        expiry = self._round_expiry
+
+        # Remembered for the drivers' adaptive loop period — a fast poll near expiry
+        # must not cost an extra RPC per loop.
+        self._last_head = block
+        self._last_expiry = expiry
+
 
         log.debug("[%s] block=%s expiry=%s (%s left)", self.symbol, block, expiry, expiry - block)
 
@@ -1209,8 +1351,11 @@ class MarketMakerBot:
                 self._round_swept = True
             if block > window_end:
                 self.settle_settlement_quote(expiry, block)  # LAST settle = canonical mark
-                self.roll_round(expiry)
                 self._own_current.clear()
+                self._own_current.clear()
+                # Next round starts at block + ROUND_BLOCKS. No createMarket: the deploy
+                # script owns the pair's single long-lived market (one-market-per-pair).
+                self._start_round(block)
                 return
             if self._settlement_quote_id is None and block < window_end - 2:
                 # Restart / missed step inside the window: submit the settlement quote
@@ -1268,6 +1413,7 @@ class MarketMakerBot:
     def run(self, once: bool = False) -> None:
         self._sync_nonce()
         self.ensure_approvals()
+        self.ensure_market()
 
         while True:
             try:
@@ -1289,6 +1435,7 @@ def run_all(bots: list[MarketMakerBot], once: bool = False) -> None:
     another pair's 5 s poll."""
     for b in bots:
         b.ensure_approvals()
+        b.ensure_market()
     while True:
         for b in bots:
             try:

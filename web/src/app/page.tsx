@@ -113,12 +113,14 @@ export default function HomePage() {
 }
 
 function GroupCard({ group, price }: { group: MarketGroup; price: bigint | undefined }) {
+  if (!group.market) return null;
   return (
     <MarketCard
-      market={group.active ?? group.latest}
+      market={group.market}
       price={price}
+      roundExpiry={group.active?.expiryBlock}
       expired={!group.active}
-      liveRounds={group.activeRounds.length}
+      liveRounds={group.rounds.filter((r) => r.live).length}
     />
   );
 }
