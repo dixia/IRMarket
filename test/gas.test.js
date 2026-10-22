@@ -32,7 +32,7 @@ const BOT_GAS = {
   approve: 56_691n,
   submit_quote: 315_413n,
   settle: 72_956n,
-  withdraw: 129_367n,
+  withdraw: 150_000n,
   create_market: 218_789n,
 };
 

@@ -53,7 +53,12 @@ except ImportError:  # imported as a package (bot.verifier) rather than a script
 # An explicit path is immune to CWD, debugger and REPL. override=False is kept, so
 # variables already in the environment still win (e.g. $env:MARKET_ID=n overrides
 # bot/.env).
-load_dotenv(Path(__file__).resolve().parent / ".env")
+#
+# BOT_ENV_FILE selects a different env file (e.g. bot/.env.fuji for the second
+# systemd unit on the ops box). Unset -> bot/.env, so existing deployments and
+# scripts/ops/run_testnet_live.sh (which already exports BOT_ENV_FILE) behave as before.
+_ENV_OVERRIDE = os.getenv("BOT_ENV_FILE")
+load_dotenv(Path(_ENV_OVERRIDE) if _ENV_OVERRIDE else Path(__file__).resolve().parent / ".env")
 
 log = logging.getLogger("irmarket-bot")
 
@@ -123,7 +128,7 @@ MULTICALL3_ABI = [
 #   approve            33,586       47,242      56,691
 #   submit_quote      287,219      292,944     315,413
 #   settle             48,192       65,429      72,956
-#   withdraw          123,206      123,206     129,367
+#   withdraw          123,206      123,206     150,000
 #   create_market     172,678      198,542     218,789
 #
 # "live cold" = eth_estimateGas on the real oracle/wrapper (the production path);
@@ -148,7 +153,7 @@ GAS_DEFAULTS = {
     "approve": 56_691,
     "submit_quote": 315_413,
     "settle": 72_956,
-    "withdraw": 129_367,
+    "withdraw": 150_000,
     "create_market": 218_789,
 }
 
