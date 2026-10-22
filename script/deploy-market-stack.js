@@ -51,15 +51,19 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514";
+const ASSETS_RAW = process.env.ASSETS || "MOUTAI:1500,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514";
 
 // Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
 // price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
 const FEED_DESCRIPTORS = {
+  // NVDA is retired from the default set (bot/.env.example BOT_SKIP_SYMBOLS=NVDA)
+  // but kept here so an explicit ASSETS=NVDA:... still prices correctly.
   NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
   SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
   SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
   GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
+  // 贵州茅台 (Kweichow Moutai), SSE 600519 — A-share, CNY (nominal in the demo).
+  MOUTAI: { priceSource: "sina", priceSymbol: "sh600519", assetClass: "stocks" },
   DEEPSEEK: { priceSource: "synthetic" },
   // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless
   // priceSymbol pins one with `@region` — not exercised by any default entry;

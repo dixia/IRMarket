@@ -164,8 +164,11 @@ class PriceSource(Protocol):
   `GET https://api.nebius.cloud/billing/v1alpha1/spot-price` → `items[]`, match
   `productTitle` by GPU model (`B300`, `H200`, `RTX PRO 6000`, …), USD per
   GPU-hour; unpinned = lowest across regions, `@region` pins one.
-- `SinaHKSource(code)` — `GET https://hq.sinajs.cn/list=hk{code}`, parse field 6 (last).
-- `TencentHKSource(code)` — `GET https://qt.gtimg.cn/q=hk{code}`, parse field 3 (last).
+- `SinaSource(code)` — `GET https://hq.sinajs.cn/list={market}{code}`; `market` ∈
+  `hk|sh|sz` (bare code ⇒ `hk`). Last price is field **6** for HK, field **3** for
+  A-shares (`sh`/`sz`).
+- `TencentSource(code)` — `GET https://qt.gtimg.cn/q={market}{code}`, parse field 3
+  (last) for both HK and A-shares. `SinaHKSource`/`TencentHKSource` remain as aliases.
 - `FallbackSource([s1, s2, …])` — try each; first success wins.
 - `CachedSource(inner, ttl_seconds, max_staleness_seconds, seed_wad, outage_policy)` — TTL
   cache + last-good value + staleness guard (below).
@@ -220,10 +223,10 @@ request ─▶ CachedSource
 - `marketStatus == "Closed"` (equities) is **not** an error: the last sale is a valid
   (frozen) mark; log at DEBUG + record `lastTradeTimestamp` so the demo can explain a
   non-moving price.
-- Fallback chain per asset: equities `nasdaq → yahoo → last-good → halt`; HK
-  `sina → tencent → last-good → halt`; GPU spot `nebius → last-good → halt`
-  (single endpoint — no secondary source); under `seed` policy the chain ends at
-  the seed.
+- Fallback chain per asset: equities `nasdaq → yahoo → last-good → halt`; CN
+  (HK + A-shares) `sina → tencent → last-good → halt` (`hk02513`, `sh600519`,
+  `sz000001`, …); GPU spot `nebius → last-good → halt` (single endpoint — no
+  secondary source); under `seed` policy the chain ends at the seed.
 
 ### 5.4 FX (quote unit)
 
@@ -234,6 +237,9 @@ i.e. the label is nominal. This spec **preserves** that (US factor = 1.0) but is
 behind one per-asset `FX_QUOTE_PER_USD` (default `1.0`) so the US names can be converted to
 true HKD (≈ 7.8) later without touching adapters. Note the tradeoff: converting US names makes
 all pairs consistently HKD (matching GLM) but changes the current on-screen marks — see §12 D-B.
+
+A-shares (`sh`/`sz`) are quoted in **CNY**; the demo treats them the same nominal way (factor
+`1.0`, global USD factor ignored), so `MOUTAI` shows its raw CNY number as "HKD".
 
 ### 5.5 Do NOT clamp real feeds
 
@@ -279,6 +285,7 @@ Existing entries gain two fields (`priceSource`, `priceSymbol`; `assetClass` def
 | `PRICE_FEED_OUTAGE_POLICY` | `halt` | `halt` = refuse to quote on no-usable-price (default, §5.3); `seed` = legacy fairPrice fallback |
 | `FX_QUOTE_PER_USD` | `1.0` | quote-per-USD multiplier (§5.4) |
 | `PRICE_FEED_FALLBACK` | `1` | enable secondary source (yahoo / tencent) |
+| `BOT_SKIP_SYMBOLS` | `NVDA` | registry symbols the bot must not quote (CSV, case-insensitive); stops quoting without touching the on-chain market/registry |
 | `NASDAQ_API_BASE` | `https://api.nasdaq.com/api/quote` | override/testing |
 | `YAHOO_API_BASE` | `https://query1.finance.yahoo.com` | override/testing |
 | `NEBIUS_API_BASE` | `https://api.nebius.cloud/billing/v1alpha1/spot-price` | override/testing (GPU spot, §5.1) |
@@ -293,7 +300,7 @@ Existing entries gain two fields (`priceSource`, `priceSymbol`; `assetClass` def
 
 | file | change |
 |---|---|
-| `bot/price_feed.py` | NEW, stdlib-only module: `PriceSource`/`SyntheticWalkSource`/`NasdaqSource`/`YahooSource`/`NebiusSource`/`SinaHKSource`/`TencentHKSource`/`FallbackSource`/`CachedSource`/`build_feed` |
+| `bot/price_feed.py` | NEW, stdlib-only module: `PriceSource`/`SyntheticWalkSource`/`NasdaqSource`/`YahooSource`/`NebiusSource`/`SinaSource`/`TencentSource`/`FallbackSource`/`CachedSource`/`build_feed` |
 | `bot/verifier.py` | `PairConfig` gains `price_source`/`price_symbol`/`asset_class`/`fx_quote_per_usd`; `load_asset_configs` reads them; `__init__` builds the real feed via `build_feed(pair)`; keep `get(block)` |
 | `deployment-assets.json` | add `SOXX` entry; add `priceSource`/`priceSymbol` to NVDA/GLM/SNDK/DEEPSEEK (gitignored — regenerate) |
 | `script/deploy-market-stack.js` | add `SOXX` to default `ASSETS` (`NVDA:…,GLM:…,SNDK:…,DEEPSEEK:…,SOXX:…`); pass through per-asset `priceSource` when writing the registry (or write from a sibling map) |
@@ -351,8 +358,12 @@ timeout-bounded (≈5 s) and wrapped so an exception can never bubble into `step
       (`B300` → 6.70 USD/GPU-hour live); `@region` pin (`B300@us-north1` → 8.29);
       unknown GPU/region and empty `items` raise; `fx` applied; a malformed SKU row is
       skipped rather than aborting the scan.
-- [x] `SinaHKSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6;
-      `TencentHKSource` parses `v_hk02513="…~02513~518.000~…"` → field 3.
+- [x] `SinaSource` parses `var hq_str_hk02513="Z.AI,…,…,518.000,…"` → field 6 (HK);
+      `TencentSource` parses `v_hk02513="…~02513~518.000~…"` → field 3.
+- [x] A-shares (issue #35): `SinaSource("sh600519")` parses field **3** (live ¥1318.49),
+      `TencentSource("sh600519")`/`("sz000001")` parse field 3; `hk`/`sh`/`sz` prefixes
+      route to the right URL/key; a bare code still means `hk`.
+- [x] `BOT_SKIP_SYMBOLS=NVDA` drops NVDA from the quoted pairs (registry/market untouched).
 - [x] GBK company-name bytes decode without raising (`errors="replace"`).
 - [x] `CachedSource`: within TTL no second HTTP call; past TTL refetches; all-sources-down but
       within `max_staleness` returns last-good; past it the outage policy applies (default

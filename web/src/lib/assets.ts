@@ -6,6 +6,7 @@ export const ASSET_NAMES: Record<string, string> = {
   SNDK: "SanDisk",
   SOXX: "iShares Semiconductor ETF",
   GLM: "Zhipu Technology (Z.AI) · 02513.HK",
+  MOUTAI: "Kweichow Moutai · 600519.SH",
   DEEPSEEK: "DeepSeek",
   LLM: "Liuliumei (06658.HK)",
   // Nebius spot GPU prices, USD per GPU-hour (bot/price_feed.py NebiusSource).

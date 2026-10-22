@@ -84,3 +84,8 @@ _Tracking convention: this file is only an index — each item references a GH i
 
 - GH: https://github.com/dixia/IRMarket/issues/23
 - Status: **OPEN** — mock+tests, bot `settle_round` simplify, backtest dual-mode, docs, ABI refresh, and wrapper/vault re-point to the new oracle `0x0BC3…` done. Remaining (manual ops, tracked separately): ops-server bot redeploy with the new `ORACLE_ADDRESS`/`MARKET_ADDRESS`, Vercel env update + redeploy, production re-point decision.
+
+## Bot: retire NVDA quoting; add Moutai (600519.SH) A-share feed
+
+- GH: https://github.com/dixia/IRMarket/issues/35
+- Status: **OPEN** — `SinaSource`/`TencentSource` now cover `hk|sh|sz` (A-share last price = field 3); `MOUTAI` descriptor + default `ASSETS` (`NVDA` dropped) + web label; `BOT_SKIP_SYMBOLS=NVDA` stops quoting without touching the registry. Live ¥1318.49 both sources; 66/66 bot tests.

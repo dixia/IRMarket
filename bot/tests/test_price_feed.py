@@ -297,6 +297,69 @@ class SinaHKSourceTests(unittest.TestCase):
         self.assertEqual(price_feed.SinaHKSource("02513").fetch(0), 518000000000000000000)
 
 
+class SinaAShareSourceTests(unittest.TestCase):
+    """A-shares (SSE/SZSE): field 3 is the last price, not field 6 like HK."""
+
+    BODY_SH = (
+        "var hq_str_sh600519=\"贵州茅台,1303.210,1309.690,1318.490,"
+        "1322.000,1296.000,1318.080,1318.490,4249133,5576216948.000,...\";"
+    ).encode("gbk")
+
+    def test_parses_field_three(self):
+        _patch_http(self, lambda url, headers=None, timeout=5: self.BODY_SH)
+        self.assertEqual(price_feed.SinaSource("sh600519").fetch(0), 1318490000000000000000)
+
+    def test_url_and_key_use_market_prefix(self):
+        seen = {}
+
+        def fake(url, headers=None, timeout=5):
+            seen["url"] = url
+            return self.BODY_SH
+
+        _patch_http(self, fake)
+        price_feed.SinaSource("sh600519").fetch(0)
+        self.assertIn("/list=sh600519", seen["url"])
+
+    def test_bare_code_defaults_to_hk(self):
+        self.assertEqual(price_feed.SinaSource("02513").market, "hk")
+
+    def test_empty_ticker_raises(self):
+        with self.assertRaises(ValueError):
+            price_feed.SinaSource("   ")
+
+    def test_hk_alias_still_works(self):
+        self.assertIs(price_feed.SinaHKSource, price_feed.SinaSource)
+
+
+class TencentAShareSourceTests(unittest.TestCase):
+    BODY_SH = (
+        "v_sh600519=\"1~贵州茅台~600519~1318.49~1309.69~1303.21~42491~22341~20150~...\";"
+    ).encode("gbk")
+
+    def test_parses_field_three(self):
+        _patch_http(self, lambda url, headers=None, timeout=5: self.BODY_SH)
+        self.assertEqual(price_feed.TencentSource("sh600519").fetch(0), 1318490000000000000000)
+
+    def test_url_and_key_use_market_prefix(self):
+        seen = {}
+
+        def fake(url, headers=None, timeout=5):
+            seen["url"] = url
+            return self.BODY_SH
+
+        _patch_http(self, fake)
+        price_feed.TencentSource("sh600519").fetch(0)
+        self.assertIn("/q=sh600519", seen["url"])
+
+    def test_sz_market_supported(self):
+        body = 'v_sz000001="1~平安银行~000001~11.50~11.40~11.42~...";'.encode("gbk")
+        _patch_http(self, lambda url, headers=None, timeout=5: body)
+        self.assertEqual(price_feed.TencentSource("sz000001").fetch(0), 11500000000000000000)
+
+    def test_hk_alias_still_works(self):
+        self.assertIs(price_feed.TencentHKSource, price_feed.TencentSource)
+
+
 class TencentHKSourceTests(unittest.TestCase):
     def test_parses_field_three(self):
         body = b'v_hk02513="100~x~02513~518.000~513.500~529.000~...~HKD~...";'
@@ -539,6 +602,13 @@ class BuildFeedTests(unittest.TestCase):
             feed = price_feed.build_feed(_pair(price_source="sina", price_symbol="hk02513"))
         self.assertEqual([s.name for s in feed.inner.sources], ["sina", "tencent"])
         self.assertEqual(feed.inner.sources[0].code, "02513")
+
+    def test_moutai_a_share_selects_sina_then_tencent(self):
+        with mock.patch.dict(os.environ, {"PRICE_FEED_ENABLED": "1"}):
+            feed = price_feed.build_feed(_pair(price_source="sina", price_symbol="sh600519"))
+        self.assertEqual([s.name for s in feed.inner.sources], ["sina", "tencent"])
+        self.assertEqual(feed.inner.sources[0].market, "sh")
+        self.assertEqual(feed.inner.sources[0].code, "600519")
 
     def test_tencent_selects_tencent_then_sina(self):
         with mock.patch.dict(os.environ, {"PRICE_FEED_ENABLED": "1"}):

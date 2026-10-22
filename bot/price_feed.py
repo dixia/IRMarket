@@ -12,8 +12,9 @@ Design (see ``docs/design/bot-real-price-feed-spec.md`` §5):
     backdrop).
   * ``NebiusSource`` — Nebius spot (preemptible) GPU prices, USD per GPU-hour,
     from the unauthenticated API behind nebius.com/spot-prices.
-  * ``SinaHKSource`` / ``TencentHKSource`` — HK (Sina primary, Tencent fallback);
-    natively HKD.
+  * ``SinaSource`` / ``TencentSource`` — CN quotes for HK **and** A-shares
+    (`hk02513`, `sh600519`, `sz000001`); HK prices are HKD, A-shares CNY
+    (both used nominally in the demo's "HKD" quote unit).
   * ``FallbackSource`` — try sources in order, first success wins.
   * ``CachedSource`` — TTL cache + last-good + staleness guard. On a total outage
     (no last-good, or last-good older than ``PRICE_FEED_MAX_STALENESS_SECONDS``)
@@ -101,12 +102,20 @@ def _clean_number(text) -> float:
     return value
 
 
-def _hk_code(symbol: str) -> str:
-    """Normalise an HK code: ``"hk02513"``/``"02513"`` -> ``"02513"``."""
+def _market_code(symbol: str) -> tuple[str, str]:
+    """Split a CN/HK ticker into ``(market, code)``.
+
+    Accepts an explicit market prefix — ``hk02513`` (HKEX), ``sh600519`` /
+    ``sz000001`` (SSE/SZSE A-shares) — and defaults to ``hk`` for a bare code
+    (the historical behaviour: ``"02513"`` == ``"hk02513"``)."""
     s = str(symbol).strip()
-    if s.lower().startswith("hk"):
-        s = s[2:]
-    return s
+    low = s.lower()
+    for market in ("sh", "sz", "hk"):
+        if low.startswith(market) and len(s) > len(market):
+            return market, s[len(market):]
+    if not s:
+        raise ValueError("empty ticker")
+    return "hk", s
 
 
 # --------------------------------------------------------------------------- http
@@ -309,50 +318,61 @@ class NebiusSource(PriceSource):
 # --------------------------------------------------------------------- HK feeds
 
 
-class SinaHKSource(PriceSource):
-    """Sina (unofficial) HK quote: ``/list=hk{code}`` -> ``var hq_str_hk…``.
-    Field 6 (comma-split) is the last price; the response is GBK."""
+class SinaSource(PriceSource):
+    """Sina (unofficial) CN quote: ``/list={market}{code}`` -> ``var hq_str_{market}{code}="…"``.
+
+    Field layout differs by market: A-shares (``sh``/``sz``) put the last price at
+    field **3**; HK puts it at field **6**. The response is GBK."""
 
     name = "sina"
 
     def __init__(self, code: str, fx: float = None):
-        self.code = _hk_code(code)
+        self.market, self.code = _market_code(code)
         self.fx = 1.0 if fx is None else float(fx)
+
+    @property
+    def _field(self) -> int:
+        return 3 if self.market in ("sh", "sz") else 6
 
     def fetch(self, _block: int) -> int:
         base = os.getenv("SINA_API_BASE", _DEFAULT_SINA_BASE)
-        url = f"{base}/list=hk{self.code}"
+        ticker = f"{self.market}{self.code}"
+        url = f"{base}/list={ticker}"
         headers = {"User-Agent": _BROWSER_UA, "Referer": "https://finance.sina.com.cn"}
         raw = _http_get(url, headers)
         text = raw.decode("gbk", "replace")
-        key = f'hq_str_hk{self.code}="'
+        key = f'hq_str_{ticker}="'
         idx = text.find(key)
         if idx < 0:
             raise ValueError(f"sina: field {key!r} not found")
         payload = text[idx + len(key):].split('"', 1)[0]
         fields = payload.split(",")
-        if len(fields) <= 6:
-            raise ValueError(f"sina: expected ≥7 fields, got {len(fields)}")
-        return _to_wad(_clean_number(fields[6]), self.fx)
+        field = self._field
+        if len(fields) <= field:
+            raise ValueError(f"sina: expected >{field + 1} fields, got {len(fields)}")
+        return _to_wad(_clean_number(fields[field]), self.fx)
 
 
-class TencentHKSource(PriceSource):
-    """Tencent (unofficial) HK quote: ``/q=hk{code}`` -> ``v_hk…``.
-    Field 3 (``~``-split) is the last price; the response is GBK."""
+class TencentSource(PriceSource):
+    """Tencent (unofficial) CN quote: ``/q={market}{code}`` -> ``v_{market}{code}="…"``.
+
+    Field 3 (``~``-split) is the last price for both HK and A-shares; the response
+    is GBK."""
 
     name = "tencent"
 
     def __init__(self, code: str, fx: float = None):
-        self.code = _hk_code(code)
+        self.market, self.code = _market_code(code)
         self.fx = 1.0 if fx is None else float(fx)
 
     def fetch(self, _block: int) -> int:
         base = os.getenv("TENCENT_API_BASE", _DEFAULT_TENCENT_BASE)
-        url = f"{base}/q=hk{self.code}"
+        ticker = f"{self.market}{self.code}"
+        url = f"{base}/q={ticker}"
         headers = {"User-Agent": _BROWSER_UA, "Referer": "https://gu.qq.com"}
         raw = _http_get(url, headers)
         text = raw.decode("gbk", "replace")
-        key = f'v_hk{self.code}="'
+        key = f'v_{ticker}="'
         idx = text.find(key)
         if idx < 0:
             raise ValueError(f"tencent: field {key!r} not found")
@@ -361,6 +381,11 @@ class TencentHKSource(PriceSource):
         if len(fields) <= 3:
             raise ValueError(f"tencent: expected ≥4 fields, got {len(fields)}")
         return _to_wad(_clean_number(fields[3]), self.fx)
+
+
+# Historical names (HK-only) kept so existing imports/tests keep working.
+SinaHKSource = SinaSource
+TencentHKSource = TencentSource
 
 
 # ------------------------------------------------------------------- aggregation
@@ -512,9 +537,10 @@ def _effective_fx(pair) -> float:
     return float(fx)
 
 
-def _hk_fx(pair) -> float:
-    """HK-source FX: always 1.0 (GLM/02513.HK is already HKD). An explicit
-    per-asset ``fx_quote_per_usd`` is honoured as an escape hatch; the global
+def _local_fx(pair) -> float:
+    """CN/HK-source FX: always 1.0 (GLM/02513.HK is HKD; A-shares are CNY — the
+    demo quote unit is nominal, so neither is converted). An explicit per-asset
+    ``fx_quote_per_usd`` is honoured as an escape hatch; the global
     ``FX_QUOTE_PER_USD`` is deliberately ignored."""
     fx = getattr(pair, "fx_quote_per_usd", None)
     return 1.0 if fx is None else float(fx)
@@ -545,7 +571,7 @@ def build_feed(pair, logger=None):
         return synthetic()
 
     us_fx = _effective_fx(pair)
-    hk_fx = _hk_fx(pair)
+    local_fx = _local_fx(pair)
     fallback_on = os.getenv("PRICE_FEED_FALLBACK", "1") == "1"
 
     if source == "nasdaq":
@@ -564,9 +590,9 @@ def build_feed(pair, logger=None):
             logger.warning("%s source without a symbol — using synthetic", source)
             return synthetic()
         if source == "sina":
-            sources = [SinaHKSource(symbol, fx=hk_fx), TencentHKSource(symbol, fx=hk_fx)]
+            sources = [SinaSource(symbol, fx=local_fx), TencentSource(symbol, fx=local_fx)]
         else:
-            sources = [TencentHKSource(symbol, fx=hk_fx), SinaHKSource(symbol, fx=hk_fx)]
+            sources = [TencentSource(symbol, fx=local_fx), SinaSource(symbol, fx=local_fx)]
         inner = FallbackSource(sources)
     elif source == "nebius":
         symbol = getattr(pair, "price_symbol", None) or getattr(pair, "symbol", None)

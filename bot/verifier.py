@@ -355,7 +355,29 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
                 fx_quote_per_usd=a.get("fxQuotePerUsd"),
             )
         )
+    pairs = _apply_skip_symbols(pairs)
     return shared, pairs
+
+
+def _skip_symbols() -> set[str]:
+    """Registry symbols this bot must not quote (`BOT_SKIP_SYMBOLS`, CSV)."""
+    raw = os.getenv("BOT_SKIP_SYMBOLS", "")
+    return {s.strip().upper() for s in raw.split(",") if s.strip()}
+
+
+def _apply_skip_symbols(pairs: list["PairConfig"]) -> list["PairConfig"]:
+    """Drop pairs whose registry symbol is in `BOT_SKIP_SYMBOLS`.
+
+    Keeps the on-chain market and the registry intact — this only stops THIS bot
+    from quoting it (e.g. retire NVDA from the demo set without a redeploy)."""
+    skip = _skip_symbols()
+    if not skip:
+        return pairs
+    kept = [p for p in pairs if (p.symbol or "").upper() not in skip]
+    skipped = sorted((p.symbol or "") for p in pairs if (p.symbol or "").upper() in skip)
+    if skipped:
+        log.info("BOT_SKIP_SYMBOLS: not quoting %s", ", ".join(skipped))
+    return kept
 
 
 def load_env_pair() -> PairConfig:
@@ -388,7 +410,12 @@ def resolve_pairs(explicit: Optional[str] = None) -> tuple[dict, list[PairConfig
             f"{_resolve_assets_path(explicit)} — create it, or unset ASSETS_FILE "
             f"to use the legacy MONITORED_PAIRS config"
         )
-    return {}, [load_env_pair()]
+    pair = load_env_pair()
+    if not _apply_skip_symbols([pair]):
+        raise RuntimeError(
+            f"BOT_SKIP_SYMBOLS excludes the only configured pair ({pair.symbol or pair.base_token})"
+        )
+    return {}, [pair]
 
 
 class MarketMakerBot:
