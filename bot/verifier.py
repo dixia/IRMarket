@@ -247,6 +247,27 @@ class BotContext:
         else:
             raise RuntimeError(f"RPC unreachable after retries: {rpc}")
 
+        # web3 v7's ValidationMiddleware re-resolves the chain id (TWO `eth_chainid`
+        # calls) for every single `eth_call`, just to validate tx params this bot never
+        # sets. Measured on the production endpoint: 1,198,195 `eth_chainid` out of
+        # 2,344,000 requests in 8 days, and the count decomposes exactly as
+        # 2 x (web3 eth_call) + 1 x (signed tx) — i.e. >50% of the RPC bill produced
+        # nothing. The bot is single-chain, so keep the middleware's only useful check
+        # here, once at boot, and drop the per-call overhead.
+        try:
+            self.w3.middleware_onion.remove("validation")
+        except Exception as e:  # middleware renamed/removed in a future web3
+            log.warning(
+                "could not drop web3's validation middleware (%s) — every eth_call "
+                "will cost 2 extra eth_chainid", e,
+            )
+        self.chain_id = int(shared.get("chainId") or os.getenv("CHAIN_ID", "10143"))
+        actual_chain_id = self.w3.eth.chain_id
+        if actual_chain_id != self.chain_id:
+            raise RuntimeError(
+                f"RPC chain id {actual_chain_id} != expected {self.chain_id} ({rpc})"
+            )
+
         self.pk = os.environ["PRIVATE_KEY"]
         self.account = self.w3.eth.account.from_key(self.pk)
         self.address = self.account.address
@@ -464,6 +485,7 @@ class MarketMakerBot:
         # (Monad bills the gas LIMIT, not what a tx used).
         self._read_cache: dict[int, dict] = {}
         self._read_count = 0  # per-step quote/market reads, logged at DEBUG (see step)
+        self._batch_warned = False  # one loud warning if Multicall3 batching is broken
 
     @property
     def _nonce(self) -> Optional[int]:
@@ -508,7 +530,15 @@ class MarketMakerBot:
             if self._nonce is None:
                 self._sync_nonce()
             tx = fn.build_transaction(
-                {"from": self.address, "nonce": self._nonce, "gas": gas, "gasPrice": self._gas_price()}
+                {
+                    "from": self.address,
+                    "nonce": self._nonce,
+                    "gas": gas,
+                    "gasPrice": self._gas_price(),
+                    # Pin it: without this web3's TRANSACTION_DEFAULTS fills chainId in
+                    # by spending one more `eth_chainid` per send.
+                    "chainId": self.ctx.chain_id,
+                }
             )
             signed = self.w3.eth.account.sign_transaction(tx, self.pk)
             try:
@@ -630,6 +660,15 @@ class MarketMakerBot:
         try:
             results = self.ctx.multicall3.functions.aggregate3(calls).call()
         except Exception as e:
+            # Loud once: a silent fallback triples the per-step read cost (the
+            # production endpoint showed ~3.3 eth_call per head read, i.e. this path).
+            if not self._batch_warned:
+                self._batch_warned = True
+                log.warning(
+                    "[%s] Multicall3 snapshot unavailable (%s) — falling back to "
+                    "sequential reads (~3x RPC per step); check MULTICALL3_ADDRESS",
+                    self.symbol, e,
+                )
             log.debug("[%s] snapshot batch unavailable (%s) — falling back to reads", self.symbol, e)
             return None
         self._read_count += 1  # one RPC call, however many logical reads it carried
@@ -844,7 +883,7 @@ class MarketMakerBot:
         )
         return candidate
 
-    def watch_vetoes(self) -> None:
+    def watch_vetoes(self, decision_block: Optional[int] = None) -> None:
         """FR-BOT-004: withdraw the 2x return on our vetoed quotes, log P&L.
 
         Bounded: only `_own_current | _pending_own`. An id is removed the moment its
@@ -857,10 +896,18 @@ class MarketMakerBot:
         per-id `eth_call`: statuses only move forward (ACTIVE -> vetoed/settled ->
         withdrawn) and only we can withdraw, so a same-block snapshot can at worst make
         us miss an action this step, never perform a wrong one — the next step catches
-        it. On the fallback path (no batch) `_quote_cached` simply reads each id."""
-        decision_block = self.w3.eth.block_number  # single head read for every send below
+        it. On the fallback path (no batch) `_quote_cached` simply reads each id.
+
+        `decision_block` is the head read taken by `step()`: reuse it instead of paying
+        one more `eth_blockNumber` on every step, and skip outright when nothing is owed.
+        """
+        ids = sorted(self._own_current | self._pending_own)
+        if not ids:
+            return  # nothing to watch — no head read, no reads at all
+        if decision_block is None:
+            decision_block = self.w3.eth.block_number
         decision_ts = time.time()
-        for qid in sorted(self._own_current | self._pending_own):
+        for qid in ids:
             q = self._quote_cached(qid)
             if q["status"] == SETTLED_VALID:
                 # a settle that landed without its withdraw (crash, RPC blip) — a pure
@@ -910,7 +957,7 @@ class MarketMakerBot:
                 "N/A" if fair is None else fair,
             )
 
-    def settle_round(self, round_expiry: int) -> None:
+    def settle_round(self, round_expiry: int, decision_block: Optional[int] = None) -> None:
         """After expiry: settle OUR OWN ACTIVE quotes for THIS round, oldest-first — the
         last one settled is our highest id, so it becomes the canonical mark (D-06/终价).
         Then withdraw everything still owed.
@@ -929,7 +976,8 @@ class MarketMakerBot:
         and it is never in the id sets either — `settle_settlement_quote` owns it and
         runs it after this pass, LAST, so it is the canonical mark."""
         settled_ids = []
-        decision_block = self.w3.eth.block_number  # single head read for every send below
+        if decision_block is None:
+            decision_block = self.w3.eth.block_number
         decision_ts = time.time()
         for qid in sorted(self._own_current | self._pending_own):
             q = self._quote(qid)  # fresh read: every branch here gates a send
@@ -967,7 +1015,9 @@ class MarketMakerBot:
             self.symbol, price[0], len(settled_ids),
         )
 
-    def settle_settlement_quote(self, round_expiry: int) -> None:
+    def settle_settlement_quote(
+        self, round_expiry: int, decision_block: Optional[int] = None
+    ) -> None:
         """Settle THIS round's final settlement quote (expiry E+G) — the sibling of
         `settle_round`, and it MUST run after it: `latestValidQuoteId` is last-write-
         wins, so the settlement quote settles LAST and its price is the canonical mark.
@@ -987,7 +1037,8 @@ class MarketMakerBot:
         if qid is None:
             return  # never submitted (or already handled) — nothing owed
         window_end = round_expiry + self.settlement_window_blocks
-        decision_block = self.w3.eth.block_number  # single head read for every send below
+        if decision_block is None:
+            decision_block = self.w3.eth.block_number
         decision_ts = time.time()
         q = self._quote(qid)  # fresh read: every branch here gates a send
         if q["status"] == ACTIVE and decision_block <= window_end:
@@ -1134,16 +1185,16 @@ class MarketMakerBot:
             # revert ExpiryMustBeFuture, so the boundary belongs to the window phase.
             # This also covers a stale marketId after a restart mid/late round: the
             # round's quotes are settled and a fresh market is rolled instead of crashing.
-            self.watch_vetoes()
+            self.watch_vetoes(block)
             # The sweep needs head > E: settleValidQuote reverts VerificationWindowActive
             # while block.number <= expiryBlock, and Monad bills the gas LIMIT of a
             # reverted tx. At head == E this step therefore only watches vetoes (and may
             # late-submit); the sweep runs on the next step, one block later.
             if not self._round_swept and block > expiry:
-                self.settle_round(expiry)
+                self.settle_round(expiry, block)
                 self._round_swept = True
             if block > window_end:
-                self.settle_settlement_quote(expiry)  # LAST settle = canonical mark
+                self.settle_settlement_quote(expiry, block)  # LAST settle = canonical mark
                 self.roll_round(expiry)
                 self._own_current.clear()
                 return
@@ -1156,7 +1207,7 @@ class MarketMakerBot:
                 )
         else:
             # ---- normal quoting (head < E) -------------------------------------------
-            self.watch_vetoes()
+            self.watch_vetoes(block)
             active = self._active_own_quote(expiry)
 
             if expiry - block <= self.lead_blocks and self._settlement_quote_id is None:
