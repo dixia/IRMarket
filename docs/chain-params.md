@@ -91,6 +91,26 @@ Upstream oracle deployed from `github.com/dixia/monoracle` (its own worktree, so
 Market ids NVDA/GLM/SNDK/DEEPSEEK = 1/2/3/4, `feeBps=100`, first-round `expiryBlock=59741913`.
 Bot config: `bot/.env.fuji` (gitignored; fill in `PRIVATE_KEY`).
 
+### GPU spot markets (added 2026-10-23)
+
+The four Nebius spot pairs from the Monad set (`docs/design/bot-real-price-feed-spec.md` §5.1)
+now exist on Fuji too, added with `script/deploy-assets.js` (merge mode — it keeps the pairs
+already listed in the registry instead of replacing them):
+
+| symbol | base token | marketId | seed (`fairPrice`) | live spot at deploy |
+|---|---|---|---|---|
+| B300 | `0x6CbC5c5677B09e0E1431CaB4cCa465B5358313f8` | 525 | 9.49 | 9.49 USD/GPU-hr |
+| B200 | `0xe32E0B7e983a56f01dc45e0ae7e489235E4AA77C` | 526 | 2.30 | 2.30 |
+| H200 | `0x0C5F28229d8b825F0f2510cCb069f81Dd45F1E85` | 527 | 0.95 | 0.95 |
+| H100 | `0xfFF247D190E4bA80de38214c7a2772D62ad72665` | 528 | 0.79 | 0.79 |
+
+`priceSource="nebius"`, `priceSymbol=<model>`, `assetClass="gpu"`; first-round
+`expiryBlock=59895816`. Real pricing needs `PRICE_FEED_ENABLED=1` in `bot/.env.fuji` (enabled
+on the ops server): pairs carrying a `priceSource` use their real feed (NVDA/GLM/SNDK and
+these four), DEEPSEEK stays synthetic. The old first-round `marketId`s above are only a start
+hint — the bot rolls a new round per pair, so the registry marketId goes stale by design and
+is re-derived on restart.
+
 Observed gas price during deploy was **160 wei/gas**, so the whole stack cost ~2.4 gwei of AVAX,
 far below the conservative 1 AVAX budget.
 

@@ -264,6 +264,8 @@ carry a browser `Origin`, so `NEXT_PUBLIC_RPC_URL` must be a CORS-open endpoint 
 | NVDA base / vault | `0xcD276DE522df0Ef5a3569c92b21e987B5C9dC77b` / `0xc5e66771aB07445745eE749a540B0E69d9E8EC69` |
 | GLM / SNDK / DEEPSEEK | `0xF136B7fB…9486` / `0x7C68d80E…C0EA` / `0x348292e4…E233` |
 
+| GPU spot B300 / B200 / H200 / H100 | `0x6CbC5c5677B09e0E1431CaB4cCa465B5358313f8` / `0xe32E0B7e983a56f01dc45e0ae7e489235E4AA77C` / `0x0C5F28229d8b825F0f2510cCb069f81Dd45F1E85` / `0xfFF247D190E4bA80de38214c7a2772D62ad72665` (markets 525-528, Nebius spot — see `docs/chain-params.md`) |
+
 Gas on Fuji was 160 wei/gas at deploy time; the full stack cost ~2.4 gwei of AVAX.
 
 ---
