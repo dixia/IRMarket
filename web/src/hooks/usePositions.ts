@@ -26,14 +26,13 @@ async function readQuote(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
   quoteId: bigint,
 ): Promise<{ price: bigint; baseAmount: bigint; quoteAmount: bigint; expiryBlock: bigint; settledSlot: bigint; provider: `0x${string}`; baseToken: `0x${string}`; quoteToken: `0x${string}` } | null> {
-  const raw = await publicClient
-    .readContract({
-      address: ORACLE_ADDRESS as `0x${string}`,
-      abi: MONORACLE_ABI,
-      functionName: "quotes",
-      args: [quoteId],
-    })
-    .catch(() => null);
+  // Transport failures must reject this query, not become missing positions.
+  const raw = await publicClient.readContract({
+    address: ORACLE_ADDRESS as `0x${string}`,
+    abi: MONORACLE_ABI,
+    functionName: "quotes",
+    args: [quoteId],
+  });
   if (!raw) return null;
   // Name-based decode: field indexes are derived from the doctor-gated ABI at
   // runtime (never bend the declared order — see web/src/lib/decode.ts).
@@ -91,42 +90,43 @@ export function usePositions(address: `0x${string}` | undefined) {
 
       const wrapped: Position[] = [];
       for (const log of wrappedRaw) {
+        let decoded;
         try {
-          const decoded = decodeEventLog({
+          decoded = decodeEventLog({
             abi: IRMARKET_ABI,
             data: log.data,
             topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
           });
-          if (decoded.eventName !== "VetoWrapped") continue;
-          const argsD = decoded.args as unknown as Record<string, unknown>;
-          const quoteId = argsD.quoteId as bigint;
-          const marketId = argsD.marketId as bigint;
-          const side = (argsD.side as number) ?? 0;
-          const swapIn = argsD.swapIn as bigint;
-          const swapOut = argsD.swapOut as bigint;
-          const fee = (argsD.fee as bigint) ?? 0n;
-          const q = await readQuote(publicClient, quoteId as bigint);
-          if (!q) continue;
-          const s = SIDE_LABEL[Number(side)] ?? "bull";
-          wrapped.push({
-            id: `wrapped-${quoteId.toString()}`,
-            side: s,
-            marketId: marketId as bigint,
-            baseToken: q.baseToken,
-            quoteToken: q.quoteToken,
-            quoteId: quoteId as bigint,
-            openPrice: q.price,
-            heldBase: s === "bull" ? swapOut : 0n,
-            heldQuote: s === "bear" ? swapOut : 0n,
-            paidBase: s === "bear" ? swapIn : 0n,
-            paidQuote: s === "bull" ? swapIn + fee : 0n,
-            fee,
-            expiryBlock: q.expiryBlock,
-            openedAtBlock: Number(log.blockNumber),
-          });
         } catch {
           continue;
         }
+        if (decoded.eventName !== "VetoWrapped") continue;
+        const argsD = decoded.args as unknown as Record<string, unknown>;
+        const quoteId = argsD.quoteId as bigint;
+        const marketId = argsD.marketId as bigint;
+        const side = (argsD.side as number) ?? 0;
+        const swapIn = argsD.swapIn as bigint;
+        const swapOut = argsD.swapOut as bigint;
+        const fee = (argsD.fee as bigint) ?? 0n;
+        const q = await readQuote(publicClient, quoteId as bigint);
+        if (!q) continue;
+        const s = SIDE_LABEL[Number(side)] ?? "bull";
+        wrapped.push({
+          id: `wrapped-${quoteId.toString()}`,
+          side: s,
+          marketId: marketId as bigint,
+          baseToken: q.baseToken,
+          quoteToken: q.quoteToken,
+          quoteId: quoteId as bigint,
+          openPrice: q.price,
+          heldBase: s === "bull" ? swapOut : 0n,
+          heldQuote: s === "bear" ? swapOut : 0n,
+          paidBase: s === "bear" ? swapIn : 0n,
+          paidQuote: s === "bull" ? swapIn + fee : 0n,
+          fee,
+          expiryBlock: q.expiryBlock,
+          openedAtBlock: Number(log.blockNumber),
+        });
       }
 
       const vetoed: Position[] = [];
