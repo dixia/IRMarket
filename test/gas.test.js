@@ -30,7 +30,7 @@ const E18 = 10n ** 18n;
 // ---------------------------------------------------------------------------
 const BOT_GAS = {
   approve: 56_691n,
-  submit_quote: 346_000n,
+  submit_quote: 366_000n,
   settle: 72_956n,
   withdraw: 150_000n,
   create_market: 218_789n,

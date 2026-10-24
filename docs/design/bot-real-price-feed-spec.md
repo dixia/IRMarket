@@ -319,7 +319,7 @@ timeout-bounded (≈5 s) and wrapped so an exception can never bubble into `step
 ## 8. Adding SOXX to the stack (runbook)
 
 1. **Deploy/registry** (reuses existing tokens; never deploys Monoracle):
-   `$env:ORACLE_ADDRESS="0x80732110…"; $env:ASSETS="NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514"; node script/deploy-market-stack.js`
+   `$env:ORACLE_ADDRESS="0x0BC36e1a…"; $env:ASSETS="NVDA:230,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514"; node script/deploy-market-stack.js`
    → new `SOXX` MockERC20 + a fresh market round; `deployment-assets.json` gains the SOXX
    entry with `priceSource:"nasdaq"`, `priceSymbol:"SOXX"`, `assetClass:"etf"`.
 2. **Bot**: with `PRICE_FEED_ENABLED=1`, `MarketMakerBot` auto-loads the 5th pair from the

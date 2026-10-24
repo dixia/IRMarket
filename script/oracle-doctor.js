@@ -40,9 +40,9 @@ const SIG = {
 const selector = (s) => ethers.id(s).slice(2, 10);
 
 const KNOWN = {
-  "0x0bc36e1ac475adef75f102deb1708be6e45aa16f": "upstream lazy-settlement build (IRMarket migration target)",
+  "0x0bc36e1ac475adef75f102deb1708be6e45aa16f": "upstream lazy-settlement build (IRMarket production, consumed)",
   "0x151286e6ca5f5ca20910de90c0dceaa9fd71f2c8": "upstream A (previous, ref build)",
-  "0x807321100748d75a618e508de214123cb77c9f4d": "IRMarket production A (pre-lazy, identical bytes to ref build)",
+  "0x807321100748d75a618e508de214123cb77c9f4d": "IRMarket pre-lazy production (rollback; identical bytes to ref build)",
   "0x1ababc60ca6950c94ea80f2f611ab06aaaad28c0": "older upstream (pre-cap legacy build; classifies unknown)",
   "0xf92a55d4e22456c987b3e7af2e3730b3f5022ccb": "older upstream (pre-cap legacy build; classifies unknown)",
   "0xb6523da6f177db25d766a27575624b3e1fe0a00e": "fork B (deployed, legacy prod)",

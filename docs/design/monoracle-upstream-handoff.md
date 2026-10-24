@@ -9,15 +9,14 @@
 ## 0. TL;DR (the 10-second version)
 
 - We moved IRMarket's Monoracle integration onto the **upstream build ("A")** — **code + tests only** on `main`.
-- ✅ **A fresh "A" stack is now deployed to Monad testnet** (P5, partial): oracle `0x80732110…`, wrapper
-  `0x39A14B5d…`, HKD `0x36448Ef0…`, markets NVDA/GLM/SNDK/DEEPSEEK, vault `0x95a74C58…`. A **separate**
-  verifier bot (its own wallet) quotes it; see §7.
-- 🟢 **Production is still untouched.** `irmarket.xyz` / `www.irmarket.xyz` still resolve to the **fork ("B")**
-  deployment `irmarket-5cf3wog7e…` (alias unchanged, 59d) with the fork oracle `0xb652…`. A judge sees zero change.
-- A **Vercel Preview** build of this branch (A addresses in the **Preview** env scope only) exists for
-  verification; it has **no alias**, so it cannot affect `irmarket.xyz`.
-- The remaining work is the **Production cutover** (flip the Production env to the A addresses + one
-  `vercel --prod`) — deliberately not done yet. See §3 / §7.
+- ✅ **The "A" consumer stack is deployed to Monad testnet**: oracle `0x0BC36e1a…` (lazy/implicit
+  settlement), wrapper `0x05475037…`, HKD `0x36448Ef0…`, 7 markets (NVDA/GLM/DEEPSEEK/B300/B200/H200/H100),
+  vault `0x3d52a82a…`. A **separate** verifier bot (its own wallet) quotes it; see §7.
+- 🟢 **Production is cut over (2026-10-24).** `irmarket.xyz` / `www.irmarket.xyz` serve the A-lazy stack;
+  the pre-lazy stack (`0x3B08…` / `0x95a7…` / `0x8073…`) and the fork ("B") deployment stay live on-chain
+  as rollback targets (restore the Vercel/ops env values, no contract changes).
+- Both **Production** and **Preview** Vercel env scopes carry the A-lazy addresses, so previews no longer
+  drift from production.
 
 ---
 
@@ -72,23 +71,24 @@ the production/fork bot.
 
 | Contract | Address |
 |---|---|
-| upstream oracle (A) | `0x807321100748d75a618e508de214123CB77C9f4D` (`VS=2`, `MAXVS=12000`) |
-| IRMarket wrapper | `0x3B08bd1CD96D6Ca0bB5897944ce948f1018D9dE1` (2026-10-19 redeploy: trade gate + right-sized gas; the pre-gate `0x39A14B5d…` stays on-chain, dormant) |
+| upstream oracle (A-lazy) | `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` (`VS=2`, `MAXVS=12000`; implicit settlement) |
+| IRMarket wrapper | `0x05475037AE4e0717083737eDAc38590850968E7c` (2026-10-24 lazy cutover; fee recipient = bot `0x5ceF21c2…`) |
 | HKD quote | `0x36448Ef080ba5fa251e1a9bd61782786f9e24F04` |
 | NVDA base | `0xda9CF5A68cc2d8EFA5940db4094b6377D389DE17` |
 | GLM base | `0x35B3f6b418d4D78961636Ec59d52c64B0f04612c` |
 | SNDK base | `0x760c5Ceb6333f5C0F69a980EF5EcCF5d6ffE24eA` |
 | DEEPSEEK base | `0xbc25eF3e40B43806803a87c5CB2bbdA80b9b92d5` |
-| LP vault | `0x95a74C58bbF1F8F56c02d27Aecc0024D98e67dD3` |
+| LP vault | `0x3d52a82a8a79b4Aecc90F37e506a441e0eF908AB` |
+| previous wrapper (rollback) | `0x3B08bd1CD96D6Ca0bB5897944ce948f1018D9dE1` (2026-10-19 redeploy: trade gate + right-sized gas) |
+| previous vault (rollback) | `0x95a74C58bbF1F8F56c02d27Aecc0024D98e67dD3` |
+| previous oracle (rollback) | `0x807321100748d75a618e508de214123CB77C9f4D` |
 
-Verified: `node script/oracle-doctor.js 0x80732110…` → **A**, no drift; `wrapper.oracle()` ==
-`vault.oracle()` == the new oracle. Locally (`web/.env.local` → A, `next dev`): `/` lists the 4 markets,
-`/trade` shows a live bot quote (Long/Short enabled), `/vault` reads the canonical NVDA price
-(`225.638732 HKD/NVDA`).
+Verified (2026-10-24 cutover): `node script/oracle-doctor.js 0x0BC36e1a…` → **A**, no drift;
+`wrapper.oracle()` == `vault.oracle()` == `0x0BC3…`; the bot quotes all 7 pairs on the new wrapper and
+`irmarket.xyz` serves the new addresses.
 
-Vercel: a **Preview** deployment of this branch with the A addresses in the **Preview** env scope was
-created for verification. It has **no alias**; the **Production** env scope and every `irmarket.xyz`
-alias are unchanged.
+Vercel: **Production** and **Preview** env scopes both carry the A-lazy addresses; `irmarket.xyz` is
+promoted to it (rollback = restore the pre-lazy values in both scopes and redeploy).
 
 > ⚠️ The A verifier bot needs a funded MON balance (its wallet is not the deployer). Top it up from the
 > deployer wallet if it logs `Signer had insufficient balance`.
@@ -139,7 +139,7 @@ node script/sync-oracle-abi.js         # regenerate both ABI copies from ../mono
 # deploy the IRMarket consumer stack: wrapper + HKD + 4 asset rounds + ONE vault
 # CONSUMES the upstream oracle via ORACLE_ADDRESS (required, fingerprint-gated, --dry-run available)
 # tokens are reused from deployment-assets.json (mint top-ups); never redeployed
-#   $env:ORACLE_ADDRESS="0x807321100748d75a618e508de214123CB77C9f4D"
+#   $env:ORACLE_ADDRESS="0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f"
 node script/deploy-market-stack.js
 ```
 

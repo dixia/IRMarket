@@ -80,10 +80,15 @@ _Tracking convention: this file is only an index — each item references a GH i
 - GH: https://github.com/dixia/IRMarket/issues/29
 - Status: **OPEN** — WS push relay + global store (P0-1), RollingNumber (P0-2), fine-grained selectors (P0-3), theme bootstrap + up/down colors (P0-4); P1 optimistic UI / tiered polling / chunk preload / PWA / i18n; P2 session keys / stream origin / docs SSG / brand visuals. No contract changes; relay is a stateless indexer.
 
-## Monoracle lazy/implicit settlement migration (new oracle; mock + bot + backtest + docs + re-point done)
+## Monoracle lazy/implicit settlement migration (code + production cutover done)
 
 - GH: https://github.com/dixia/IRMarket/issues/23
-- Status: **OPEN** — mock+tests, bot `settle_round` simplify, backtest dual-mode, docs, ABI refresh, and wrapper/vault re-point to the new oracle `0x0BC3…` done. Remaining (manual ops, tracked separately): ops-server bot redeploy with the new `ORACLE_ADDRESS`/`MARKET_ADDRESS`, Vercel env update + redeploy, production re-point decision.
+- Status: **DONE** — mock+tests, bot `settle_round` simplify, backtest dual-mode, docs, ABI refresh, and wrapper/vault re-point to the new oracle `0x0BC3…` landed as PR #24 (`4b2351e`); the production flip is #33.
+
+## Production cutover: run the lazy-settlement oracle on irmarket.xyz
+
+- GH: https://github.com/dixia/IRMarket/issues/33
+- Status: **DONE (2026-10-24)** — fresh wrapper `0x05475037…` + vault `0x3d52a82a…` bound to the lazy oracle `0x0BC36e1a…`; tokens + 7 pairs reused, fee recipient = bot `0x5ceF…`. Ops box pulled to `main`, `bot/.env` re-pointed (`GAS_SUBMIT_QUOTE_WEI=366000` — the lazy `submitQuote` needs ~348k) and restarted; Vercel Production+Preview env updated and `irmarket.xyz` redeployed. Rollback = restore the pre-lazy values (`0x3B08bd1C…` / `0x95a74C58…` / `0x80732110…`) in Vercel + the ops `bot/.env` and restart — no contract changes.
 
 ## Bot: retire NVDA quoting; add Moutai (600519.SH) A-share feed
 

@@ -128,7 +128,7 @@ MULTICALL3_ABI = [
 #
 #   op             live cold   mock first    adopted
 #   approve            33,586       47,242      56,691
-#   submit_quote      287,219      288,190     346,000  (lazy-settlement mock)
+#   submit_quote      348,058      288,190     366,000  (lazy-settlement oracle, 2026-10-24)
 #   settle             48,192       65,429      72,956
 #   withdraw          123,206      123,206     150,000
 #   create_market     172,678      198,542     218,789
@@ -140,6 +140,12 @@ MULTICALL3_ABI = [
 # test/gas.test.js's 120% headroom tripwire are satisfied. A test run with the bare
 # live values reverted createMarket and one submitQuote out of gas — the tripwire
 # was right.
+#
+# 2026-10-24 lazy-settlement cutover: the pre-lazy 346,000 submit_quote limit is NOT
+# enough on the implicit-settlement oracle — every restock reverted out of gas at
+# exactly the limit (eth_estimateGas measured 348,058 on the live stack, i.e. the old
+# limit was ~0.6% short). The default is now 366,000 (live x1.05), so a fresh bot/.env
+# needs no GAS_SUBMIT_QUOTE_WEI override.
 #
 # Re-measure with `npx hardhat run script/gas-report.js` (local) or eth_estimateGas
 # (live) before changing any of these. test/gas.test.js fails if a limit drops below
@@ -153,7 +159,7 @@ MULTICALL3_ABI = [
 # limit can be bumped in production without a code change.
 GAS_DEFAULTS = {
     "approve": 56_691,
-    "submit_quote": 346_000,
+    "submit_quote": 366_000,
     "settle": 72_956,
     "withdraw": 150_000,
     "create_market": 218_789,

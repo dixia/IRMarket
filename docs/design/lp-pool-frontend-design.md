@@ -47,15 +47,16 @@ premium, payoff and equity figure is in `settlementToken`.
 
 | Contract | Address |
 |---|---|
-| `IRMarketVault` | `0x95a74C58bbF1F8F56c02d27Aecc0024D98e67dD3` |
-| Monoracle (**upstream build, consumed**) | `0x807321100748d75a618e508de214123CB77C9f4D` |
+| `IRMarketVault` | `0x3d52a82a8a79b4Aecc90F37e506a441e0eF908AB` |
+| Monoracle (**upstream lazy build, consumed**) | `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` |
 | `priceBase` token (NVDA) | `0xda9CF5A68cc2d8EFA5940db4094b6377D389DE17` |
 | `settlementToken` (HKD) | `0x36448Ef080ba5fa251e1a9bd61782786f9e24F04` |
 | Deployer / operator | `0xF5Cf3950CA8055408648Ce5c155B2b3967269fcE` |
 
-> A-stack (upstream consumer) — wired to Vercel **Preview**; `irmarket.xyz` still serves the fork
-> stack (`vault 0xE4B88d…`, oracle `0xb652…`) until the Production cutover. Pin record:
-> `docs/design/monoracle-version-survey.md`.
+> A-stack (upstream consumer) — live on `irmarket.xyz` since the 2026-10-24 lazy-settlement
+> cutover. The pre-lazy stack (`vault 0x95a74C58…`, wrapper `0x3B08bd1C…`, oracle `0x80732110…`)
+> and the fork stack (`vault 0xE4B88d…`, oracle `0xb652…`) stay deployed for rollback. Pin
+> record: `docs/design/monoracle-version-survey.md`.
 
 - These are also written to `deployment-vault.json` (repo root, gitignored) by
   `script/deploy-vault-rpc.js`.

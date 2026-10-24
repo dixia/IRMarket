@@ -76,9 +76,10 @@ so the frontend and bot can interface with the deployed settlement oracle.
 - **Monoracle source (upstream):** `github.com/dixia/monoracle` → `contracts/Monoracle.sol`
 - **Monoracle settlement contract (Monad testnet):** lazy-settlement deployment
   `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` (canonical price is derived at read time).
-  IRMarket's production wrapper/vault still bind the pre-lazy deployment
-  `0x807321100748d75a618e508de214123CB77C9f4D` until the re-point in #23's ops follow-up;
-  the older `0x151286e6…` / `0x1ABABc60…` deployments stay live.
+  Production (`irmarket.xyz`) is cut over to this oracle (2026-10-24): wrapper
+  `0x05475037AE4e0717083737eDAc38590850968E7c`, vault `0x3d52a82a8a79b4Aecc90F37e506a441e0eF908AB`.
+  The pre-lazy stack (`0x3B08bd1C…` / `0x95a74C58…` / `0x80732110…`) and the older
+  `0x151286e6…` / `0x1ABABc60…` deployments stay live on-chain for rollback.
 - To refresh the ABI: copy from `monoracle/artifacts/contracts/Monoracle.sol/Monoracle.json`
   into `abi/Monoracle.abi.json`.
 

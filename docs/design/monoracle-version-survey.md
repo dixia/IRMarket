@@ -23,7 +23,8 @@ the fingerprint below and exits 1 on drift).
 
 | Address | code hash | size | Family |
 |---|---|---|---|
-| `0x807321100748d75a618e508de214123CB77C9f4D` | `0x64527fccc4958fef…` | 15,292 | **A (current upstream build) — IRMarket's consumed instance** |
+| `0x807321100748d75a618e508de214123CB77C9f4D` | `0x64527fccc4958fef…` | 15,292 | **A (pre-lazy upstream build) — IRMarket's consumed instance until 2026-10-24** |
+| `0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f` | `0x01f9ddadeaef61d6…` | 8,709 | **A-lazy (implicit settlement) — IRMarket's consumed instance since 2026-10-24** |
 | `0x151286e6Ca5F5CA20910dE90C0DCEAa9fd71f2c8` | `0x64527fccc4958fef…` | 15,292 | **A — bytecode-identical** to the consumed instance (upstream's own testnet deployment); NOT wired into IRMarket |
 | `0x1ABABc60Ca6950C94eA80F2f611AB06aAAAD28c0` | `0xfe7b43d4fcc544bb…` | 14,672 | A (older) |
 | `0xF92A55D4e22456C987b3e7AF2E3730b3f5022Ccb` | `0x5eb5e5eec254b9ef…` | 8,084 | A (older; monoracle bot's oracle) |
@@ -32,10 +33,13 @@ the fingerprint below and exits 1 on drift).
 Downstream bindings (all `oracle()` immutable at construction — oracle change = downstream
 redeploy, never re-point):
 
-- wrapper `0x3B08bd1CD96D6Ca0bB5897944ce948f1018D9dE1` → `0x80732110…` (A) — deployed 2026-10-19 with the
+- wrapper `0x05475037AE4e0717083737eDAc38590850968E7c` → `0x0BC36e1a…` (A-lazy) — 2026-10-24 production
+  cutover; fee recipient = bot `0x5ceF21c2…`
+- vault `0x3d52a82a8a79b4Aecc90F37e506a441e0eF908AB` → `0x0BC36e1a…` (A-lazy), pair `(NVDA 0xda9CF5A6…, HKD 0x36448Ef0…)`
+- previous production (rollback): wrapper `0x3B08bd1CD96D6Ca0bB5897944ce948f1018D9dE1` → `0x80732110…` (A) — deployed 2026-10-19 with the
   `MarketWindowExpired` trade gate + right-sized gas limits (replaces the pre-gate wrapper `0x39A14B5d…`,
   which stays on-chain but no longer receives rounds)
-- vault `0x95a74C58bbF1F8F56c02d27Aecc0024D98e67dD3` → `0x80732110…` (A), pair `(NVDA 0xda9CF5A6…, HKD 0x36448Ef0…)`
+- previous production vault (rollback): `0x95a74C58bbF1F8F56c02d27Aecc0024D98e67dD3` → `0x80732110…` (A), same pair
 - legacy prod: wrapper `0x03b181…` + vault `0xE4B88d…` → `0xb652…` (B)
 
 ## 3. Source & provenance
@@ -53,6 +57,6 @@ redeploy, never re-point):
 
 ```bash
 node script/oracle-doctor.js                       # repo ABIs agree + known oracle fingerprints
-node script/oracle-doctor.js 0x807321100748d75a618e508de214123CB77C9f4D
+node script/oracle-doctor.js 0x0BC36e1ac475AdEF75F102deb1708BE6E45aA16f
 node script/deploy-market-stack.js --dry-run       # deployer pre-flight: REQUIRED oracle gate
 ```

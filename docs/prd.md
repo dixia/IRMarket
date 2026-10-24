@@ -492,7 +492,7 @@ Vault 页（canonical 价格头 + MVP 限制横幅）
 - 单元 fixture（前端与合约同根）：`D=100 → fee=1, N=99, maxPayout=198`；`S0=100→S1=150 → payout=148.5`；LP equity `1000 → 902（开仓）→ 951.5（结算）`
 - `npm run test:unit` = 17 通过；Playwright E2E = **20/20**（含 13-vault 三用例）
 - 用户流程录像：`docs/product/videos/lp-vault-user-flow.webm`（开仓 → 价格 130→150 → Open PnL 转正 +1.x）
-- 测试网部署（**upstream (A) consumer stack**，已锚定 Vercel Preview；`irmarket.xyz` 切换前仍为 fork 栈，地址普查见 `docs/design/monoracle-version-survey.md`）：vault `0x95a74C58…67dD3`、oracle `0x80732110…9f4D`（上游构建**被消费**，永不重部署）、NVDA `0xda9CF5A6…DE17`、HKD `0x36448Ef0…4F04`；演示 LP 已播种（vault `Equity 5,000 HKD`）
+- 测试网部署（**upstream (A-lazy) consumer stack**，Production 与 Preview 均指向它；`irmarket.xyz` 已于 2026-10-24 切换，地址普查见 `docs/design/monoracle-version-survey.md`）：vault `0x3d52a82a…08AB`、wrapper `0x05475037…8E7c`、oracle `0x0BC36e1a…A16f`（上游构建**被消费**，永不重部署）、NVDA `0xda9CF5A6…DE17`、HKD `0x36448Ef0…4F04`；回滚目标 = 切换前 `0x95a74C58…` / `0x3B08bd1C…` / `0x80732110…`
 
 ---
 
