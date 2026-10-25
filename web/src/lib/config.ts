@@ -42,6 +42,10 @@ export const SELECTED_BASE_TOKENS = (process.env.NEXT_PUBLIC_SELECTED_BASE_TOKEN
 
 export const hasWrapper = MARKET_ADDRESS_RAW !== "";
 
+// Optional nuthatch nest over IRMarket + Monoracle (see src/lib/indexer.ts). Empty → positions
+// come from chunked eth_getLogs only.
+export const INDEXER_URL = (process.env.NEXT_PUBLIC_INDEXER_URL || "").trim();
+
 // LP-pool vault (IRMarketVault). Empty → vault UI shows a "not configured" state.
 export const VAULT_ADDRESS_RAW = (process.env.NEXT_PUBLIC_VAULT_ADDRESS || "").trim();
 export const VAULT_ADDRESS = VAULT_ADDRESS_RAW as `0x${string}`;
