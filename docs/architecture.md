@@ -229,10 +229,15 @@ The confirmed roadmap for how IRMarket composes with upstream Monoracle:
 2. **IRMarket curates.** The product surfaces a **selected set of pairs** for option trading
    (frontend-only registry for now: `NEXT_PUBLIC_SELECTED_BASE_TOKENS` + `deployment-assets.json`;
    the wrapper stays permissionless). Other pairs continue to exist for anyone else.
-3. **One vault per selected pair.** Each curated pair `(base_i, HKD)` gets its own
-   `IRMarketVault(oracle, base_i, HKD)`; LP deposits go **only into that pair's vault** and take
-   counterparty risk for that pair only. MVP ships exactly one (NVDA); the model extends to N by
-   deploying more (each vault is cheap; isolation is the point — spec §3, LP-01).
+3. **One vault per selected pair, created through the factory.**
+   `IRMarketVaultFactory.createVault(base, quote, feeBps)` deploys
+   `IRMarketVault(oracle, base, quote, feeBps)`; LP deposits go **only into that pair's vault** and
+   take counterparty risk for that pair only. The factory is **permissionless** (anyone can create
+   a vault for a pair that has none, and anyone can deposit — the vault has no admin), enforces
+   **one vault per (base, quote)** so duplicate-pair vaults cannot dilute the bond floor
+   (LP-D12), and binds the consumed oracle at construction. The quote token is a parameter, so
+   `(base, USD)` and `(base, HKD)` are distinct pairs. `vaultFor(base, quote)` is what the UI
+   calls before offering "create vault".
 4. **Flow per pair:** seed LPs deposit HKD → bot (a vault operator may also run one) submits
    oracle quotes → traders open veto-trades on the wrapper and/or capped-linear positions on the
    pair's vault → expiry settles at Monoracle canonical price → upgrade of the consumed oracle =
