@@ -231,16 +231,25 @@ request ─▶ CachedSource
 
 ### 5.4 FX (quote unit)
 
-Demo convention: the quote token is named "HKD". For **GLM/02513.HK the feed is already HKD**,
-so it is exactly right with no conversion. For the US names (NVDA/SNDK/SOXX) the canonical
-price is currently the raw **USD** number (handoff shows `225.63 HKD/NVDA` while NVDA ≈ $217),
-i.e. the label is nominal. This spec **preserves** that (US factor = 1.0) but isolates it
-behind one per-asset `FX_QUOTE_PER_USD` (default `1.0`) so the US names can be converted to
-true HKD (≈ 7.8) later without touching adapters. Note the tradeoff: converting US names makes
-all pairs consistently HKD (matching GLM) but changes the current on-screen marks — see §12 D-B.
+**2026-10-27: two quote currencies (USD, HKD) and a live rate.** Each registry asset
+declares the currency its feed quotes in (`priceCurrency`) and each market carries a quote
+token (`quoteToken`/`quoteSymbol`). When the two differ the bot converts with a **live
+USD↔HKD rate**; when they match (the normal case) it multiplies by 1 and never calls the
+FX API. The default lineup is MOUTAI/DEEPSEEK→HKD and ASHR/B300→USD, so no conversion
+happens today — the machinery exists for cross-currency markets (e.g. Moutai quoted in USD,
+or ASHR in HKD) and for future currencies.
 
-A-shares (`sh`/`sz`) are quoted in **CNY**; the demo treats them the same nominal way (factor
-`1.0`, global USD factor ignored), so `MOUTAI` shows its raw CNY number as "HKD".
+`FxProvider` (`bot/price_feed.py`): one USD-based snapshot (`FX_API_URL`, default
+`open.er-api.com`), cached for `FX_TTL_SECONDS` (900), retry-throttled, and a **bad-API
+guard** that rejects a refresh more than `FX_MAX_DEVIATION` (20%) from the last good. A
+failed refresh keeps the last good until `FX_MAX_STALENESS_SECONDS` (86400), then raises
+`FeedOutageError` — the bot refuses to quote off a stale rate (a wrong FX is a mispriced
+option, i.e. free money for a veto-arbitrageur). `FX_STATIC=1` pins `FX_HKD_PER_USD`.
+
+Historical note (kept for context): before this, the quote token was named "HKD" and the
+US/CNY feeds were treated as nominal (`FX_QUOTE_PER_USD = 1.0`), i.e. the label was a
+convention rather than a conversion. `fxQuotePerUsd` on an asset still overrides the live
+rate for that pair (escape hatch).
 
 ### 5.5 Do NOT clamp real feeds
 

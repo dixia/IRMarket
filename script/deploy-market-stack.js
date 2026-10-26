@@ -55,7 +55,8 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "MOUTAI:1500,ASHR:27,DEEPSEEK:45,B300:4.39";
+const DEFAULT_QUOTE = QUOTE_SYMBOL.toUpperCase();
+const ASSETS_RAW = process.env.ASSETS || "MOUTAI:1500:HKD,DEEPSEEK:45:HKD,ASHR:27:USD,B300:4.39:USD";
 
 // Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
 // price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
@@ -80,7 +81,13 @@ const FEED_DESCRIPTORS = {
   H100: { priceSource: "nebius", priceSymbol: "H100", assetClass: "gpu" },
   "RTX PRO 6000": { priceSource: "nebius", priceSymbol: "RTX PRO 6000", assetClass: "gpu" },
 };
-const feedDescriptor = (symbol) => FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
+const NATIVE_BY_SOURCE = { nasdaq: "USD", yahoo: "USD", nebius: "USD", sina: "HKD", tencent: "HKD" };
+// native price currency of the feed; synthetic prices are nominal in the quote unit
+const feedDescriptor = (symbol, quoteSymbol) => {
+  const d = FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
+  const priceCurrency = d.priceCurrency || NATIVE_BY_SOURCE[d.priceSource] || quoteSymbol;
+  return { ...d, priceCurrency };
+};
 
 const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS;
 if (!ORACLE_ADDRESS) {
@@ -180,7 +187,7 @@ async function main() {
   console.log(`wrapper mode: ${FRESH_WRAPPER ? "FRESH (--fresh-wrapper: deploy new even if the registry's wrapper binds this oracle)" : "reuse if the registry's wrapper binds this oracle"}\n`);
 
   // reuse decisions
-  const reuseQuote = !FRESH_TOKENS && registry?.quoteToken && ethers.isAddress(registry.quoteToken) ? registry.quoteToken : undefined;
+  
   const bySymbol = new Map((registry?.assets || []).map((a) => [a.symbol, a]));
 
   // deployment-assets.json is REWRITTEN wholesale from ASSETS at the end of this script,
@@ -206,7 +213,7 @@ async function main() {
   }
   if (wrapperAddr) console.log(`[1/5] IRMarket wrapper: REUSE ${wrapperAddr}`);
   else console.log("[1/5] IRMarket wrapper: deploy new (oracle-bound at construction)");
-  console.log("[2/5] HKD quote: " + (reuseQuote ? `REUSE ${reuseQuote}` : "deploy new"));
+  console.log(`[2/5] quote tokens: ${[...new Set(assets.map((a) => a.quoteSymbol))].join(", ")}`);
   console.log(`[3/5] base tokens: ${assets.map((a) => {
     const r = bySymbol.get(a.symbol);
     return !FRESH_TOKENS && r?.baseToken ? `${a.symbol} REUSE ${r.baseToken}` : `${a.symbol} deploy new`;
@@ -280,17 +287,31 @@ async function main() {
   }
   txHashes.market = txHashes.market || (market.reused ? "0x0 (reused)" : txHashes.market);
 
-  // 2) HKD quote
-  let quote;
-  if (reuseQuote) {
-    quote = { address: reuseQuote, abi: tokenArtifact.abi, txHash: null, reused: true };
-  } else {
-    quote = { ...await deploy("MockERC20 HKD", tokenArtifact, [QUOTE_NAME, QUOTE_SYMBOL, DECIMALS]), reused: false };
-    txHashes.quoteToken = quote.txHash;
+  // 2) quote tokens — one per currency referenced by ASSETS (USD, HKD, ...).
+  // Reused from `quoteTokens` (v2) or the legacy single `quoteToken` when it
+  // matches the default currency; minted and oracle-approved once each.
+  const quoteAddrs = new Map();
+  const quoteReused = {};
+  for (const sym of new Set(assets.map((a) => a.quoteSymbol))) {
+    let addr = !FRESH_TOKENS
+      ? registry?.quoteTokens?.[sym] || (sym === DEFAULT_QUOTE ? registry?.quoteToken : undefined)
+      : undefined;
+    if (addr && ethers.isAddress(addr)) {
+      quoteReused[sym] = true;
+      console.log(`  quote ${sym}: REUSE ${addr}`);
+    } else {
+      const dep = await deploy(`MockERC20 ${sym}`, tokenArtifact, [sym, sym, DECIMALS]);
+      addr = dep.address;
+      txHashes[`quoteToken_${sym}`] = dep.txHash;
+      quoteReused[sym] = false;
+      console.log(`  quote ${sym}: DEPLOY ${addr}`);
+    }
+    const c = new ethers.Contract(addr, tokenArtifact.abi, wallet);
+    await topUp(c, await c.balanceOf(addr), MINT_QUOTE, sym);
+    await ensureApproval(c, oracleAddr, sym);
+    quoteAddrs.set(sym, ethers.getAddress(addr));
   }
-  const quoteC = new ethers.Contract(quote.address, tokenArtifact.abi, wallet);
-  await topUp(quoteC, await quoteC.balanceOf(addr), MINT_QUOTE, "HKD");
-  await ensureApproval(quoteC, oracleAddr, "HKD");
+  const firstQuote = quoteAddrs.get(assets[0].quoteSymbol);
 
   // 3-4) base tokens + rounds
   const marketC = new ethers.Contract(market.address, market.abi, wallet);
@@ -312,21 +333,23 @@ async function main() {
     const baseC = new ethers.Contract(base.address, tokenArtifact.abi, wallet);
     await topUp(baseC, await baseC.balanceOf(addr), MINT_BASE, asset.symbol);
     await ensureApproval(baseC, oracleAddr, asset.symbol);
+    const quoteAddr = quoteAddrs.get(asset.quoteSymbol);
     const rc = await call(`createMarket ${asset.symbol}`, marketC, "createMarket",
-      [base.address, quote.address, addr, expiryBlock, FEE_BPS], GAS.createMarket);
+      [base.address, quoteAddr, addr, expiryBlock, FEE_BPS], GAS.createMarket);
     const log = rc.logs
       .map((l) => { try { return marketC.interface.parseLog(l); } catch { return null; } })
       .find((l) => l && l.name === "MarketCreated");
     const marketId = log ? log.args.marketId.toString() : null;
-    console.log(`  marketId ${marketId ?? "?"}`);
+    console.log(`  marketId ${marketId ?? "?"} (${asset.symbol}/${asset.quoteSymbol})`);
     assetResults.push({
       symbol: asset.symbol,
       baseToken: base.address,
-      quoteToken: quote.address,
+      quoteToken: quoteAddr,
+      quoteSymbol: asset.quoteSymbol,
       fairPrice: asset.fairPrice.toString(),
       marketId,
       expiryBlock: expiryBlock.toString(),
-      ...feedDescriptor(asset.symbol),
+      ...feedDescriptor(asset.symbol, asset.quoteSymbol),
     });
   }
 
@@ -352,7 +375,7 @@ async function main() {
         priceBase: await v.priceBase().catch(() => null),
         settlementToken: await v.settlementToken().catch(() => null),
       };
-      if (shouldReuseVault(bindings, { oracle: oracleAddr, baseToken: first.baseToken, quoteToken: quote.address })) {
+      if (shouldReuseVault(bindings, { oracle: oracleAddr, baseToken: first.baseToken, quoteToken: firstQuote })) {
         vault = { address: ethers.getAddress(vaultRegistry.vault), abi: vaultArtifact.abi, txHash: vaultRegistry.txHashes?.vault };
         vaultReused = true;
         console.log(`\n[5/5] vault REUSE ${vault.address} (bindings match)`);
@@ -361,7 +384,7 @@ async function main() {
       }
     }
     if (!vault) {
-      vault = await deploy("IRMarketVault", vaultArtifact, [oracleAddr, first.baseToken, quote.address, FEE_BPS], GAS.fallbackVault);
+      vault = await deploy("IRMarketVault", vaultArtifact, [oracleAddr, first.baseToken, firstQuote, FEE_BPS], GAS.fallbackVault);
       txHashes.vault = vault.txHash;
     }
     first.vault = vault.address; // per-pair binding (MVP ships assets[0] only)
@@ -375,11 +398,11 @@ async function main() {
     oracle: oracleAddr,
     market: market.address,
     baseToken: first.baseToken,
-    quoteToken: quote.address,
+    quoteToken: firstQuote,
     marketId: first.marketId,
     feeBps: Number(FEE_BPS),
     expiryBlock: expiryBlock.toString(),
-    reused: { market: market.reused, quoteToken: quote.reused, vault: vaultReused },
+    reused: { market: market.reused, quoteTokens: quoteReused, vault: vaultReused },
     txHashes,
     timestamp: now,
   };
@@ -388,7 +411,8 @@ async function main() {
     chainId: CHAIN_ID,
     oracle: oracleAddr,
     market: market.address,
-    quoteToken: quote.address,
+    quoteToken: firstQuote,
+    quoteTokens: Object.fromEntries(quoteAddrs),
     assets: assetResults,
   };
   const vaultOut = {
@@ -397,7 +421,7 @@ async function main() {
     deployer: addr,
     oracle: oracleAddr,
     priceBase: first.baseToken,
-    settlementToken: quote.address,
+    settlementToken: firstQuote,
     vault: vault?.address,
     feeBps: Number(FEE_BPS),
     reusedExistingStack: vaultReused,
@@ -417,7 +441,7 @@ async function main() {
   console.log(`  NEXT_PUBLIC_ORACLE_ADDRESS=${oracleAddr}   (consumed upstream — NEVER redeploy this script side)`);
   console.log(`  NEXT_PUBLIC_MARKET_ADDRESS=${market.address}`);
   console.log(`  NEXT_PUBLIC_BASE_TOKEN=${first.baseToken}`);
-  console.log(`  NEXT_PUBLIC_QUOTE_TOKEN=${quote.address}`);
+  console.log(`  NEXT_PUBLIC_QUOTE_TOKEN=${firstQuote}`);
   console.log(`  NEXT_PUBLIC_VAULT_ADDRESS=${vault?.address ?? "(unchanged — --skip-vault)"}`);
   console.log(`\nExplorer: https://testnet.monadscan.com/address/${market.reused ? oracleAddr : market.address}`);
 }

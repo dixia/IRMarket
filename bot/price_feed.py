@@ -546,6 +546,144 @@ def _local_fx(pair) -> float:
     return 1.0 if fx is None else float(fx)
 
 
+# ------------------------------------------------------------------------ fx
+#
+# Two quote currencies are supported (USD, HKD). Each registry asset declares the
+# currency its feed quotes in (`priceCurrency`) and each market has a quote token
+# (`quoteSymbol`); when they differ the bot converts with a LIVE USD↔HKD rate.
+# CNY assets are registered as HKD (the product treats CNY as nominal HKD), so
+# CNY never needs a rate of its own.
+
+_FX_API_DEFAULT = "https://open.er-api.com/v6/latest/USD"
+
+# Fallback native currency per feed source, used when the registry has no
+# `priceCurrency` (legacy registries).
+_NATIVE_BY_SOURCE = {
+    "nasdaq": "USD",
+    "yahoo": "USD",
+    "nebius": "USD",
+    "sina": "HKD",
+    "tencent": "HKD",
+}
+
+
+class FxProvider:
+    """Live USD↔HKD rate; ``rate(native, quote)`` = quote units per native unit.
+
+    The common case (each asset quoted in its native currency) short-circuits to
+    1.0 without touching the network. Refresh policy for the cross-currency case:
+
+      * cached for ``FX_TTL_SECONDS`` (900);
+      * a failed refresh keeps the last good rate until
+        ``FX_MAX_STALENESS_SECONDS`` (86400), then raises ``FeedOutageError`` —
+        never quote off a stale rate (a wrong FX is a mispriced option, which is
+        exactly what arbitrageurs veto);
+      * a refresh more than ``FX_MAX_DEVIATION`` (20%) away from the last good is
+        rejected (bad-API guard);
+      * ``FX_STATIC=1`` pins ``FX_HKD_PER_USD`` (7.8) and never fetches.
+    """
+
+    _shared = None
+
+    @classmethod
+    def shared(cls) -> "FxProvider":
+        if cls._shared is None:
+            cls._shared = cls()
+        return cls._shared
+
+    def __init__(self, logger=None):
+        self._log = logger or globals()["log"]
+        self._hkd = None  # last good HKD per USD
+        self._at = 0.0  # when it was fetched
+        self._attempt_at = 0.0
+
+    def _ttl(self) -> float:
+        return _env_float("FX_TTL_SECONDS", 900)
+
+    def _max_staleness(self) -> float:
+        return _env_float("FX_MAX_STALENESS_SECONDS", 86400)
+
+    def hkd_per_usd(self) -> float:
+        if os.getenv("FX_STATIC", "0") == "1":
+            return _env_float("FX_HKD_PER_USD", 7.8)
+        now = time.time()
+        if self._hkd is not None and now - self._at < self._ttl():
+            return self._hkd
+        if now - self._attempt_at < self._ttl():
+            # retry throttle: at most one attempt per TTL window during an outage
+            return self._last_good_or_raise(now)
+        self._attempt_at = now
+        try:
+            url = os.getenv("FX_API_URL", _FX_API_DEFAULT)
+            raw = _http_get(url, {"User-Agent": _BROWSER_UA, "Accept": "application/json"})
+            data = json.loads(raw.decode("utf-8", "replace"))
+            rate = float(data["rates"]["HKD"])
+            if rate <= 0:
+                raise ValueError(f"non-positive HKD rate {rate!r}")
+            if self._hkd is not None:
+                drift = abs(rate - self._hkd) / self._hkd
+                if drift > _env_float("FX_MAX_DEVIATION", 0.20):
+                    self._log.warning(
+                        "fx: HKD/USD %.4f is %.0f%% off the last good %.4f — keeping the last good",
+                        rate, drift * 100, self._hkd,
+                    )
+                    self._at = now  # don't hammer the API for a rejected value
+                    return self._hkd
+            self._hkd = rate
+            self._at = now
+            self._log.info("fx: HKD per USD = %.4f", rate)
+            return rate
+        except Exception as e:  # noqa: BLE001 - network / parse / API shape
+            self._log.warning("fx refresh failed: %s", e)
+            return self._last_good_or_raise(now)
+
+    def _last_good_or_raise(self, now: float) -> float:
+        if self._hkd is not None and now - self._at < self._max_staleness():
+            self._log.warning(
+                "fx: last-good HKD/USD %.4f (age %.0fs) — stale but usable", self._hkd, now - self._at
+            )
+            return self._hkd
+        raise FeedOutageError(
+            "fx: no fresh USD<->HKD rate — refusing to quote a cross-currency pair"
+        )
+
+    def rate(self, native: str, quote: str) -> float:
+        n = (native or "").upper()
+        q = (quote or "").upper()
+        if n == q:
+            return 1.0
+        hkd = self.hkd_per_usd()
+        if n == "USD" and q == "HKD":
+            return hkd
+        if n == "HKD" and q == "USD":
+            return 1.0 / hkd
+        raise ValueError(f"fx: unsupported currency pair {n}->{q}")
+
+
+class FxSource(PriceSource):
+    """Scale an inner (native-currency) source into the pair's quote currency.
+
+    The multiplier is resolved per fetch, so a rate refresh is picked up without
+    rebuilding the bot."""
+
+    name = "fx"
+
+    def __init__(self, inner, provider, native, quote, logger=None):
+        self.inner = inner
+        self.provider = provider
+        self.native = native
+        self.quote = quote
+        self._log = logger or globals()["log"]
+
+    def fetch(self, block: int) -> int:
+        value = self.inner.get(block)
+        rate = self.provider.rate(self.native, self.quote)
+        if rate == 1.0:
+            return value
+        self._log.debug("fx: %s->%s x%.4f", self.native, self.quote, rate)
+        return int(round(value * rate))
+
+
 def build_feed(pair, logger=None):
     """Build a price source for ``pair``.
 
@@ -573,6 +711,24 @@ def build_feed(pair, logger=None):
     us_fx = _effective_fx(pair)
     local_fx = _local_fx(pair)
     fallback_on = os.getenv("PRICE_FEED_FALLBACK", "1") == "1"
+
+    # Cross-currency quoting: convert with the live rate rather than a static
+    # factor. Same-currency pairs (the normal case) never touch the FX API; an
+    # explicit per-asset `fxQuotePerUsd` remains the escape hatch.
+    native = (
+        (getattr(pair, "price_currency", None) or _NATIVE_BY_SOURCE.get(source, "") or "").upper()
+    )
+    quote = (getattr(pair, "quote_currency", None) or "").upper()
+    live_fx = (
+        bool(native)
+        and bool(quote)
+        and native != quote
+        and getattr(pair, "fx_quote_per_usd", None) is None
+    )
+    if live_fx:
+        us_fx = 1.0
+        local_fx = 1.0
+        logger.info("fx: %s quoted in %s — live USD<->HKD conversion", native, quote)
 
     if source == "nasdaq":
         symbol = getattr(pair, "price_symbol", None) or getattr(pair, "symbol", None)
@@ -612,4 +768,6 @@ def build_feed(pair, logger=None):
         logger.warning("unknown price source %r — using synthetic", source)
         return synthetic()
 
+    if live_fx:
+        inner = FxSource(inner, FxProvider.shared(), native, quote, logger=logger)
     return CachedSource(inner, seed_wad=fair, logger=logger)

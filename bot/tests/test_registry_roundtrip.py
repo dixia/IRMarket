@@ -113,13 +113,27 @@ class PersistRoundTest(unittest.TestCase):
         self.assertEqual(pairs[0].expiry_block, 74_000_000)
 
 
+    def test_registry_currencies_reach_pair_config(self):
+        with open(self.path, "w", encoding="utf8") as f:
+            data = json.loads(json.dumps(REGISTRY))
+            data["assets"][0]["quoteSymbol"] = "HKD"
+            data["assets"][0]["priceCurrency"] = "USD"
+            data["assets"][1]["quoteSymbol"] = "USD"
+            data["assets"][1]["priceCurrency"] = "USD"
+            json.dump(data, f)
+        with unittest.mock.patch.dict(os.environ, {"BOT_SKIP_SYMBOLS": ""}):
+            _shared, pairs = verifier.load_asset_configs(self.path)
+        self.assertEqual((pairs[0].price_currency, pairs[0].quote_currency), ("USD", "HKD"))
+        self.assertEqual((pairs[1].price_currency, pairs[1].quote_currency), ("USD", "USD"))
+
+
 class DefaultAssetSetTest(unittest.TestCase):
     """The demo set is MOUTAI + ASHR + DEEPSEEK + B300 (B300 is the only GPU)."""
 
     def test_deploy_default_assets(self):
         js = (BOT_DIR.parent / "script" / "deploy-market-stack.js").read_text(encoding="utf8")
         line = next(l for l in js.splitlines() if "process.env.ASSETS" in l)
-        for keep in ("MOUTAI", "ASHR", "DEEPSEEK", "B300"):
+        for keep in ("MOUTAI:1500:HKD", "DEEPSEEK:45:HKD", "ASHR:27:USD", "B300:4.39:USD"):
             self.assertIn(keep, line)
         for gone in ("NVDA", "GLM", "B200", "H200", "H100", "SNDK", "SOXX"):
             self.assertNotIn(gone, line)
