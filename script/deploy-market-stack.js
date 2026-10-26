@@ -401,7 +401,7 @@ async function main() {
     vault: vault?.address,
     feeBps: Number(FEE_BPS),
     reusedExistingStack: vaultReused,
-    txHashes: { vault: vault.txHash },
+    txHashes: { vault: vault?.txHash },
     timestamp: now,
   };
 
