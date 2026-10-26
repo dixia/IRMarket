@@ -14,6 +14,9 @@ states/
 .env
 .env.local
 note.txt
+# bot send-guard state (circuit breaker + spend ledger, written at runtime)
+bot/.guard-state.json
+bot/.guard-state.json.tmp
 .mojo-agent.json
 /.agents/skills
 /.claude
