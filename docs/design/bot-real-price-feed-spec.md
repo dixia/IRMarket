@@ -91,6 +91,7 @@ feed must keep returning a **1e18 WAD integer**.
 | NVDA | NVIDIA Corp | ✅ NASDAQ: NVDA | `nasdaq` | `NVDA` | last sale |
 | SNDK | SanDisk Corp | ✅ NASDAQ: SNDK | `nasdaq` | `SNDK` | last sale |
 | **SOXX** | **iShares PHLX Semiconductor ETF** | ✅ NASDAQ (ETF) | `nasdaq` | `SOXX`, `assetclass=etf` | **new** |
+| **ASHR** | **Xtrackers Harvest CSI 300 China A-Shares ETF** | ✅ NYSE Arca (ETF) | `nasdaq` | `ASHR`, `assetclass=etf` | A-share exposure, USD-quoted (nominal in the demo) |
 | GLM | Zhipu Technology (Z.AI) | ✅ HKEX: 02513.HK | `sina` (fallback `tencent`) | `hk02513` | HKD-denominated already |
 | DEEPSEEK | DeepSeek (private co.) | ❌ not listed | `synthetic` | — | keep walk/freeze; label synthetic |
 

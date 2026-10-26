@@ -44,6 +44,10 @@ const FRESH_TOKENS = process.env.FRESH_TOKENS === "1" || process.argv.includes("
 // old wrapper — which is how the wrapper gate (issue #22) ended up "not on chain"
 // while main carried it. Tokens and the vault still reuse normally.
 const FRESH_WRAPPER = process.env.FRESH_WRAPPER === "1" || process.argv.includes("--fresh-wrapper");
+// --skip-vault (SKIP_VAULT=1): markets only — never deploy/reuse/repoint the LP
+// vault. Used when the pair lineup changes but the vault (immutable priceBase)
+// must stay as it is.
+const SKIP_VAULT = process.env.SKIP_VAULT === "1" || process.argv.includes("--skip-vault");
 const RPC_URL = process.env.RPC_URL || "https://testnet-rpc.monad.xyz";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
 const FEE_BPS = BigInt(process.env.FEE_BPS || "100");
@@ -51,16 +55,18 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "NVDA:230,DEEPSEEK:45,B300:4.39";
+const ASSETS_RAW = process.env.ASSETS || "MOUTAI:1500,ASHR:27,DEEPSEEK:45,B300:4.39";
 
 // Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
 // price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
 const FEED_DESCRIPTORS = {
-  // Default demo set is NVDA / DEEPSEEK / B300 (see ASSETS_RAW). The other
-  // symbols stay here so an explicit ASSETS=... still prices correctly.
+  // Default demo set is MOUTAI / ASHR / DEEPSEEK / B300 (see ASSETS_RAW). The
+  // other symbols stay here so an explicit ASSETS=... still prices correctly.
   NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
   SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
   SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
+  // ASHR = Xtrackers Harvest CSI 300 China A-Shares ETF (NYSE Arca), USD-quoted.
+  ASHR: { priceSource: "nasdaq", priceSymbol: "ASHR", assetClass: "etf" },
   GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
   // 贵州茅台 (Kweichow Moutai), SSE 600519 — A-share, CNY (nominal in the demo).
   MOUTAI: { priceSource: "sina", priceSymbol: "sh600519", assetClass: "stocks" },
@@ -324,34 +330,42 @@ async function main() {
     });
   }
 
-  // 5) vault — exactly one, for assets[0], reused only if bindings match
+  // 5) vault — exactly one, for assets[0], reused only if bindings match.
+  // --skip-vault (SKIP_VAULT=1): markets only. Used when the pair lineup changes
+  // but the LP vault must stay where it is (its priceBase is immutable, so a
+  // reordered lineup would otherwise deploy a second, empty vault).
   const first = assetResults[0];
   let vault, vaultReused = false;
-  if (vaultRegistry?.vault && ethers.isAddress(vaultRegistry.vault)) {
-    const v = new ethers.Contract(vaultRegistry.vault, [
-      "function oracle() view returns (address)",
-      "function priceBase() view returns (address)",
-      "function settlementToken() view returns (address)",
-    ], provider);
-    const bindings = {
-      vault: vaultRegistry.vault,
-      oracle: await v.oracle().catch(() => null),
-      priceBase: await v.priceBase().catch(() => null),
-      settlementToken: await v.settlementToken().catch(() => null),
-    };
-    if (shouldReuseVault(bindings, { oracle: oracleAddr, baseToken: first.baseToken, quoteToken: quote.address })) {
-      vault = { address: ethers.getAddress(vaultRegistry.vault), abi: vaultArtifact.abi, txHash: vaultRegistry.txHashes?.vault };
-      vaultReused = true;
-      console.log(`\n[5/5] vault REUSE ${vault.address} (bindings match)`);
-    } else {
-      console.log(`\n[5/5] vault ${vaultRegistry.vault} bindings mismatch / not an IRMarketVault → deploy new`);
+  if (SKIP_VAULT) {
+    console.log("\n[5/5] vault: SKIPPED (--skip-vault) — the existing vault registry is untouched");
+    first.vault = vaultRegistry?.vault;
+  } else {
+    if (vaultRegistry?.vault && ethers.isAddress(vaultRegistry.vault)) {
+      const v = new ethers.Contract(vaultRegistry.vault, [
+        "function oracle() view returns (address)",
+        "function priceBase() view returns (address)",
+        "function settlementToken() view returns (address)",
+      ], provider);
+      const bindings = {
+        vault: vaultRegistry.vault,
+        oracle: await v.oracle().catch(() => null),
+        priceBase: await v.priceBase().catch(() => null),
+        settlementToken: await v.settlementToken().catch(() => null),
+      };
+      if (shouldReuseVault(bindings, { oracle: oracleAddr, baseToken: first.baseToken, quoteToken: quote.address })) {
+        vault = { address: ethers.getAddress(vaultRegistry.vault), abi: vaultArtifact.abi, txHash: vaultRegistry.txHashes?.vault };
+        vaultReused = true;
+        console.log(`\n[5/5] vault REUSE ${vault.address} (bindings match)`);
+      } else {
+        console.log(`\n[5/5] vault ${vaultRegistry.vault} bindings mismatch / not an IRMarketVault → deploy new`);
+      }
     }
+    if (!vault) {
+      vault = await deploy("IRMarketVault", vaultArtifact, [oracleAddr, first.baseToken, quote.address, FEE_BPS], GAS.fallbackVault);
+      txHashes.vault = vault.txHash;
+    }
+    first.vault = vault.address; // per-pair binding (MVP ships assets[0] only)
   }
-  if (!vault) {
-    vault = await deploy("IRMarketVault", vaultArtifact, [oracleAddr, first.baseToken, quote.address, FEE_BPS], GAS.fallbackVault);
-    txHashes.vault = vault.txHash;
-  }
-  first.vault = vault.address; // per-pair binding (MVP ships assets[0] only)
 
   const now = new Date().toISOString();
   const deployment = {
@@ -384,7 +398,7 @@ async function main() {
     oracle: oracleAddr,
     priceBase: first.baseToken,
     settlementToken: quote.address,
-    vault: vault.address,
+    vault: vault?.address,
     feeBps: Number(FEE_BPS),
     reusedExistingStack: vaultReused,
     txHashes: { vault: vault.txHash },
@@ -393,14 +407,18 @@ async function main() {
 
   fs.writeFileSync(path.join(rootDir, "deployment.json"), JSON.stringify(deployment, null, 2));
   fs.writeFileSync(path.join(rootDir, "deployment-assets.json"), JSON.stringify(assetsOut, null, 2));
-  fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(vaultOut, null, 2));
+  if (SKIP_VAULT) {
+    console.log("\n(--skip-vault: deployment-vault.json left untouched)");
+  } else {
+    fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(vaultOut, null, 2));
+  }
 
   console.log("\n=== Done — wrote deployment.json / deployment-assets.json / deployment-vault.json ===");
   console.log(`  NEXT_PUBLIC_ORACLE_ADDRESS=${oracleAddr}   (consumed upstream — NEVER redeploy this script side)`);
   console.log(`  NEXT_PUBLIC_MARKET_ADDRESS=${market.address}`);
   console.log(`  NEXT_PUBLIC_BASE_TOKEN=${first.baseToken}`);
   console.log(`  NEXT_PUBLIC_QUOTE_TOKEN=${quote.address}`);
-  console.log(`  NEXT_PUBLIC_VAULT_ADDRESS=${vault.address}`);
+  console.log(`  NEXT_PUBLIC_VAULT_ADDRESS=${vault?.address ?? "(unchanged — --skip-vault)"}`);
   console.log(`\nExplorer: https://testnet.monadscan.com/address/${market.reused ? oracleAddr : market.address}`);
 }
 

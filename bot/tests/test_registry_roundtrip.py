@@ -114,15 +114,21 @@ class PersistRoundTest(unittest.TestCase):
 
 
 class DefaultAssetSetTest(unittest.TestCase):
-    """The demo set is NVDA + DEEPSEEK + B300 (B300 is the only GPU)."""
+    """The demo set is MOUTAI + ASHR + DEEPSEEK + B300 (B300 is the only GPU)."""
 
     def test_deploy_default_assets(self):
         js = (BOT_DIR.parent / "script" / "deploy-market-stack.js").read_text(encoding="utf8")
         line = next(l for l in js.splitlines() if "process.env.ASSETS" in l)
-        for keep in ("NVDA", "DEEPSEEK", "B300"):
+        for keep in ("MOUTAI", "ASHR", "DEEPSEEK", "B300"):
             self.assertIn(keep, line)
-        for gone in ("GLM", "B200", "H200", "H100", "SNDK", "SOXX", "MOUTAI"):
+        for gone in ("NVDA", "GLM", "B200", "H200", "H100", "SNDK", "SOXX"):
             self.assertNotIn(gone, line)
+
+    def test_ashr_has_a_real_price_descriptor(self):
+        js = (BOT_DIR.parent / "script" / "deploy-market-stack.js").read_text(encoding="utf8")
+        line = next(l for l in js.splitlines() if l.strip().startswith("ASHR:"))
+        self.assertIn("nasdaq", line)
+        self.assertIn('"ASHR"', line)
 
 
 if __name__ == "__main__":
