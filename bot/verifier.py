@@ -26,6 +26,7 @@ The bot is the market maker / provider: bilateral collateral quotes back every
 trade, zero-sum (D-10); the 1% wrapper fee lands at market.marketMaker in HKD.
 """
 
+import json
 import logging
 import os
 import time
@@ -88,6 +89,14 @@ class SendBackoff(RuntimeError):
 
 class InsufficientBalance(RuntimeError):
     """A send is skipped because the wallet cannot fund it (see _send)."""
+
+
+class LabelPoisoned(RuntimeError):
+    """A call label is parked by the circuit breaker (see _send / _trip_breaker)."""
+
+
+class BudgetExceeded(RuntimeError):
+    """The rolling gas budget is spent, so nothing is sent (see _send)."""
 
 # Upstream Monoracle caps the veto window; a quote whose expiry exceeds block + this reverts
 # `ExpiryTooFar`. Mirror ../monoracle Monoracle.sol (`MAX_VERIFICATION_SLOTS`).
@@ -193,6 +202,25 @@ REVERT_BACKOFF_BASE_S = float(os.getenv("REVERT_BACKOFF_BASE_S", "5"))
 REVERT_BACKOFF_MAX_S = float(os.getenv("REVERT_BACKOFF_MAX_S", "300"))
 MIN_BALANCE_TX_MULT = float(os.getenv("MIN_BALANCE_TX_MULT", "3"))
 LOW_BALANCE_WARN_EVERY_S = float(os.getenv("LOW_BALANCE_WARN_EVERY_S", "300"))
+
+# --- circuit breaker + spend budget -----------------------------------------
+# The backoff above caps a revert loop at one attempt per REVERT_BACKOFF_MAX_S,
+# which still leaks ~0.16 MON/h per stuck label (~1.1 MON/h with all 7 pairs
+# stuck). These two hard stops close that:
+#   * a label that keeps reverting past MAX_CONSECUTIVE_REVERTS is POISONED —
+#     no more sends for POISON_COOLDOWN_S, logged once at ERROR;
+#   * every send is charged to a rolling budget (gas x price, exact on Monad)
+#     and nothing is sent once MAX_MON_PER_HOUR / MAX_MON_PER_DAY is spent, so
+#     an unknown failure mode can only burn what the budget allows.
+# Both live on the shared BotContext and are persisted to GUARD_STATE_FILE
+# (empty string = don't persist) so a systemd restart cannot reset them — a
+# crash loop is exactly the case that must not retry a doomed call every boot.
+MAX_CONSECUTIVE_REVERTS = int(os.getenv("MAX_CONSECUTIVE_REVERTS", "5"))
+POISON_COOLDOWN_S = float(os.getenv("POISON_COOLDOWN_S", "1800"))
+MAX_MON_PER_HOUR = float(os.getenv("MAX_MON_PER_HOUR", "3"))
+MAX_MON_PER_DAY = float(os.getenv("MAX_MON_PER_DAY", "20"))
+SPEND_LOG_EVERY_S = float(os.getenv("SPEND_LOG_EVERY_S", "600"))
+GUARD_STATE_FILE = os.getenv("GUARD_STATE_FILE", "bot/.guard-state.json")
 
 
 def _load_gas_table() -> dict[str, int]:
@@ -314,6 +342,12 @@ class BotContext:
         # whole process instead of one per send.
         self._balance_ts = 0.0
         self._balance_wei = 0
+        # Spend ledger (ts, wei) over the last 24 h + circuit-breaker state. Both
+        # are process-global because all pairs share one wallet, and both are
+        # restored from GUARD_STATE_FILE so a restart cannot reset a stop.
+        self._spend: list[tuple[float, int]] = []
+        self._poisoned: dict[str, float] = {}
+        self._load_guard_state()
 
     def balance_wei(self, ttl: float = 30.0) -> int:
         """Wallet balance, cached for `ttl` seconds across every pair's bot."""
@@ -323,6 +357,90 @@ class BotContext:
         self._balance_wei = self.w3.eth.get_balance(self.address)
         self._balance_ts = now
         return self._balance_wei
+
+    # ------------------------------------------------ spend budget + breaker
+    # Shared by every pair's bot (one wallet, one budget). Persisted so a
+    # restart cannot wipe a stop that already tripped.
+
+    def _load_guard_state(self) -> None:
+        path = GUARD_STATE_FILE
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+        except Exception as e:  # corrupt file must never block the bot
+            log.warning("guard state %s unreadable (%s) — starting clean", path, e)
+            return
+        now = time.time()
+        self._spend = [
+            (float(ts), int(wei))
+            for ts, wei in data.get("spend", [])
+            if now - float(ts) < 86400  # older than the day window: irrelevant
+        ]
+        self._poisoned = {
+            str(label): float(until)
+            for label, until in data.get("poisoned", {}).items()
+            if float(until) > now
+        }
+        if self._spend or self._poisoned:
+            log.info(
+                "guard state restored: %d spend marks, %d poisoned label(s) (%s)",
+                len(self._spend), len(self._poisoned), path,
+            )
+
+    def _save_guard_state(self) -> None:
+        path = GUARD_STATE_FILE
+        if not path:
+            return
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "spend": [[ts, wei] for ts, wei in self._spend],
+                        "poisoned": self._poisoned,
+                    },
+                    f,
+                )
+            os.replace(tmp, path)  # atomic: a crash mid-write cannot corrupt it
+        except Exception as e:  # never let bookkeeping kill a send
+            log.warning("could not persist guard state to %s: %s", path, e)
+
+    def record_spend(self, wei: int) -> None:
+        """Charge one tx to the rolling 24 h ledger (Monad bills the gas limit)."""
+        if wei <= 0:
+            return
+        self._spend.append((time.time(), int(wei)))
+        cutoff = time.time() - 86400
+        self._spend = [(ts, w) for ts, w in self._spend if ts >= cutoff]
+        self._save_guard_state()
+
+    def spend_since(self, seconds: float) -> int:
+        cutoff = time.time() - seconds
+        return sum(w for ts, w in self._spend if ts >= cutoff)
+
+    def is_poisoned(self, label: str) -> bool:
+        until = self._poisoned.get(label)
+        if until is None:
+            return False
+        if until <= time.time():
+            self._poisoned.pop(label, None)
+            self._save_guard_state()
+            return False
+        return True
+
+    def poisoned_until(self, label: str) -> float:
+        return self._poisoned.get(label, 0.0)
+
+    def poison(self, label: str, seconds: float) -> float:
+        until = time.time() + seconds
+        self._poisoned[label] = until
+        self._save_guard_state()
+        return until
 
         # Assets file (when present) is authoritative for the shared addresses;
         # env vars are the fallback so the legacy single-pair setup keeps working.
@@ -528,6 +646,7 @@ class MarketMakerBot:
         # the throttle for the low-balance warning.
         self._revert_state: dict[str, dict[str, Any]] = {}
         self._low_balance_warned = 0.0
+        self._budget_warned = 0.0
         # Id of THIS round's final settlement quote (expiry E + settlement_window_blocks),
         # or None while it has not been submitted. Replaces the old boolean
         # `_final_submitted`: `is None` is the "not submitted yet" gate (step, restart
@@ -600,14 +719,19 @@ class MarketMakerBot:
     ) -> Any:
         """Sign + send a tx with manual nonce tracking; retry on nonce races.
 
-        Two guards keep a failing send from burning the wallet (Monad bills the
-        gas LIMIT of a mined tx, so a mined revert costs the full limit):
+        Four guards keep a failing send from burning the wallet (Monad bills the gas
+        LIMIT of a mined tx, so a mined revert costs the full limit):
 
+          * **circuit breaker** — a label parked by `_note_revert` is not sent at
+            all until its cool-down expires (`LabelPoisoned`).
           * **revert backoff** — a label that reverts REVERT_BACKOFF_AFTER times
             in a row is skipped for an exponentially growing window
             (5 s -> 300 s cap) instead of being retried every loop. This is what
             the Oct 21-22 incident needed: ~21k reverted `withdrawProviderFunds`
             txs, ~270 MON, all of them no-ops.
+          * **spend budget** — every tx is charged to a rolling ledger; once
+            MAX_MON_PER_HOUR / MAX_MON_PER_DAY is spent nothing is sent
+            (`BudgetExceeded`), so an unknown failure mode can only burn the cap.
           * **balance floor** — if the wallet cannot fund MIN_BALANCE_TX_MULT x
             this tx, the send is skipped and a (throttled) warning names the
             address to fund, instead of failing at the RPC once per loop.
@@ -621,6 +745,14 @@ class MarketMakerBot:
         `dt_send_s` isolates the bot's own processing from the network's inclusion
         delay (`post_send_gap_blocks`); `incl_gap_blocks` is the sum of the two.
         """
+        # --- guard 0: circuit breaker ------------------------------------------
+        if self.ctx.is_poisoned(label):
+            raise LabelPoisoned(
+                f"{label}: parked by the circuit breaker for another "
+                f"{self.ctx.poisoned_until(label) - time.time():.0f}s "
+                f"(reverted {MAX_CONSECUTIVE_REVERTS}+ times — not retryable)"
+            )
+
         # --- guard 1: revert backoff -------------------------------------------
         state = self._revert_state.get(label)
         if state is not None and time.time() < state["until"]:
@@ -632,8 +764,29 @@ class MarketMakerBot:
 
         price = self._gas_price()
 
-        # --- guard 2: balance floor --------------------------------------------
-        required = int(gas * price * MIN_BALANCE_TX_MULT)
+        # --- guard 2: rolling spend budget -------------------------------------
+        cost = int(gas * price)
+        spent_h = self.ctx.spend_since(3600)
+        spent_d = self.ctx.spend_since(86400)
+        if (
+            spent_h + cost > int(MAX_MON_PER_HOUR * E18)
+            or spent_d + cost > int(MAX_MON_PER_DAY * E18)
+        ):
+            now = time.time()
+            if now - self._budget_warned >= SPEND_LOG_EVERY_S:
+                self._budget_warned = now
+                log.error(
+                    "%s: BUDGET EXCEEDED — spent %.2f MON in the last hour and %.2f MON "
+                    "in the last day (caps %.1f/h, %.1f/day); NOT sending. "
+                    "The bot resumes when the window rolls or the caps are raised.",
+                    label, spent_h / E18, spent_d / E18, MAX_MON_PER_HOUR, MAX_MON_PER_DAY,
+                )
+            raise BudgetExceeded(
+                f"{label}: budget exceeded (hour {spent_h / E18:.2f} + {cost / E18:.4f} MON)"
+            )
+
+        # --- guard 3: balance floor --------------------------------------------
+        required = int(cost * MIN_BALANCE_TX_MULT)
         balance = self.ctx.balance_wei()
         if balance < required:
             now = time.time()
@@ -683,22 +836,40 @@ class MarketMakerBot:
                 # cursor so the next send does not reuse it (that would pay for a second
                 # failed attempt before the nonce-race recovery kicks in).
                 self._nonce += 1
-                self._note_revert(label, gas, price, h.hex())
+                self.ctx.record_spend(cost)  # a revert is a paid no-op — charge it
+                self._note_revert(label, cost, h.hex())
                 raise RuntimeError(f"{label}: tx reverted {h.hex()}")
             self._nonce += 1
+            self.ctx.record_spend(cost)
             self._revert_state.pop(label, None)  # healthy again — clear the backoff
             log.info("%s ok (gas %s) %s", label, receipt.gasUsed, h.hex())
             return receipt
         raise RuntimeError(f"{label}: nonce sync exhausted")
 
-    def _note_revert(self, label: str, gas: int, price: int, tx_hash: str) -> None:
-        """Record a reverted send and arm the backoff once it repeats.
+    def _note_revert(self, label: str, cost: int, tx_hash: str) -> None:
+        """Record a reverted send, back off, and trip the breaker once it repeats.
 
         Logs the MON already spent on this label so a loop is visible in the log
         instead of only on the balance curve."""
         state = self._revert_state.setdefault(label, {"fails": 0, "wasted": 0, "until": 0.0})
         state["fails"] += 1
-        state["wasted"] += gas * price
+        state["wasted"] += cost
+        if state["fails"] >= MAX_CONSECUTIVE_REVERTS:
+            # The backoff alone still leaks one attempt per REVERT_BACKOFF_MAX_S;
+            # stop paying for a call that clearly cannot succeed.
+            until = self.ctx.poison(label, POISON_COOLDOWN_S)
+            state["until"] = until
+            log.error(
+                "%s: reverted (tx %s) %d times in a row — CIRCUIT BREAKER: no sends for "
+                "%.0f min (~%.4f MON spent on this call). Fix the cause; the backoff "
+                "alone would keep paying one attempt per %ss.",
+                label, tx_hash, state["fails"], POISON_COOLDOWN_S / 60,
+                state["wasted"] / E18, REVERT_BACKOFF_MAX_S,
+            )
+            # The breaker supersedes the backoff: drop the episode so the label
+            # starts clean if it is ever resumed (after the cool-down).
+            self._revert_state.pop(label, None)
+            return
         if state["fails"] < REVERT_BACKOFF_AFTER:
             log.warning(
                 "%s: reverted (tx %s) — attempt %d, ~%.4f MON spent on this call so far",
@@ -1422,15 +1593,47 @@ class MarketMakerBot:
     def run(self, once: bool = False) -> None:
         self._sync_nonce()
         self.ensure_approvals()
+        last_spend = [0.0]
 
         while True:
             try:
                 self.step()
+            except GUARD_SKIPS as e:
+                # Already logged once (WARNING/ERROR) by the guard that tripped;
+                # repeating it every loop would bury the real cause in noise.
+                log.debug("[%s] step skipped by a send guard: %s", self.symbol, e)
             except Exception as e:  # transient RPC/proxy resets must not kill the bot
                 log.warning("[%s] step failed (will retry): %s", self.symbol, e)
+            _log_spend([self], last_spend)
             if once:
                 return
             time.sleep(NEAR_EXPIRY_POLL_SECONDS if self._near_expiry() else self.poll_seconds)
+
+
+GUARD_SKIPS = (SendBackoff, LabelPoisoned, BudgetExceeded, InsufficientBalance)
+
+
+def _log_spend(bots: list["MarketMakerBot"], last: list[float]) -> None:
+    """Hourly-ish spend meter: makes the burn visible before it matters.
+
+    One INFO line every SPEND_LOG_EVERY_S summing the shared ledger, with the
+    balance and a crude runway estimate (1h spend -> hours left). This is the
+    line the Oct 21-22 incident never had."""
+    now = time.time()
+    if not bots or now - last[0] < SPEND_LOG_EVERY_S:
+        return
+    last[0] = now
+    ctx = bots[0].ctx
+    hour = ctx.spend_since(3600) / E18
+    day = ctx.spend_since(86400) / E18
+    balance = ctx.balance_wei() / E18
+    runway = (balance / hour) if hour > 0 else float("inf")
+    log.info(
+        "spend: %.3f MON last hour, %.3f MON last day (caps %.1f/h, %.1f/day) | "
+        "balance %.3f MON | runway ~%s h at the current rate",
+        hour, day, MAX_MON_PER_HOUR, MAX_MON_PER_DAY, balance,
+        f"{runway:.1f}" if runway != float("inf") else "inf",
+    )
 
 
 def run_all(bots: list[MarketMakerBot], once: bool = False) -> None:
@@ -1443,12 +1646,18 @@ def run_all(bots: list[MarketMakerBot], once: bool = False) -> None:
     another pair's 5 s poll."""
     for b in bots:
         b.ensure_approvals()
+    last_spend = [0.0]
     while True:
         for b in bots:
             try:
                 b.step()
+            except GUARD_SKIPS as e:
+                # Already logged once (WARNING/ERROR) by the guard that tripped;
+                # repeating it every loop would bury the real cause in noise.
+                log.debug("[%s] step skipped by a send guard: %s", b.symbol, e)
             except Exception as e:  # transient RPC/proxy resets must not kill the bot
                 log.warning("[%s] step failed (will retry): %s", b.symbol, e)
+        _log_spend(bots, last_spend)
         if once:
             return
         hot = any(b._near_expiry() for b in bots)

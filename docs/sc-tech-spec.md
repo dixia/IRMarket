@@ -378,14 +378,18 @@ when a quote settles (B12).
   code change.
 
   **Send guards (P0 of the #33 gas audit):** because the limit is the price, a mined
-  revert is a *paid* no-op — on 2026-10-21/22 the bot burned ~270 MON in 17 h on ~21k
-  reverted `withdrawProviderFunds` txs (0.0132 MON each), retried every loop. `_send`
-  now (a) backs off exponentially once a call label reverts `REVERT_BACKOFF_AFTER`
-  times (5 s → 300 s, capped) and logs the MON already spent on that label, and
-  (b) skips a send the wallet cannot fund (`MIN_BALANCE_TX_MULT` head-room) with a
-  throttled warning naming the address to fund. A successful send clears the backoff.
-  Both are env-tunable (`REVERT_BACKOFF_*`, `MIN_BALANCE_TX_MULT`,
-  `LOW_BALANCE_WARN_EVERY_S`); see `bot/.env.example`.
+  revert is a *paid* no-op. `_send` layers three stops: (a) an exponential **revert
+  backoff** per call label (`REVERT_BACKOFF_AFTER`, 5 s → 300 s), (b) a **circuit
+  breaker** that parks a label after `MAX_CONSECUTIVE_REVERTS` for
+  `POISON_COOLDOWN_S` (a capped backoff alone still leaks one attempt per window),
+  and (c) a **rolling spend budget** (`MAX_MON_PER_HOUR` / `MAX_MON_PER_DAY`, charged
+  `gas × gasPrice` per tx) after which nothing is sent at all — an unknown failure
+  mode can only burn what the cap allows. The breaker and the ledger live on the
+  shared `BotContext` and are persisted to `GUARD_STATE_FILE` (gitignored, empty =
+  off) so a systemd restart cannot reset a tripped stop. A fourth guard skips any
+  send the wallet cannot fund (`MIN_BALANCE_TX_MULT` head-room) with a throttled
+  warning naming the address to fund. `SPEND_LOG_EVERY_S` prints a meter line
+  (`MON/h`, `MON/day`, balance, runway). All env-tunable; see `bot/.env.example`.
 - **Parallel execution:** per-quote storage (`quotes[]`) touches disjoint slots across ids;
   the wrapper adds no global contention.
 - **Streaming RPC:** `VetoWrapped` + the fork's 5 events drive the indexer/UI; keep params
