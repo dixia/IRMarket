@@ -493,6 +493,54 @@ def _resolve_assets_path(explicit: Optional[str] = None) -> Path:
     return p
 
 
+def persist_round(symbol: str, market_id: int, expiry_block: int, explicit: Optional[str] = None) -> bool:
+    """Write the freshly rolled round back into the assets registry.
+
+    `deployment-assets.json` is the bot's boot hint. Without this, every restart
+    resumes from the market that was current when the file was last written — by
+    then an expired round — so the bot has to walk the whole quote ledger to
+    recover (seen live: ~60 s per pair) and then re-create a market per pair
+    (7 wasted `createMarket` txs, ~0.16 MON). Keeping `marketId`/`expiryBlock`
+    current makes a restart cheap and idempotent.
+
+    Atomic (`tmp` + rename) and best-effort: a missing/odd registry only logs.
+    Returns True when an entry was updated.
+    """
+    import json
+
+    fp = _resolve_assets_path(explicit)
+    if not fp.is_file():
+        return False
+    try:
+        with open(fp, encoding="utf8") as f:
+            data = json.load(f)
+    except Exception as e:
+        log.warning("could not read the registry %s (%s) — round not persisted", fp, e)
+        return False
+
+    want = (symbol or "").upper()
+    entry = next(
+        (a for a in data.get("assets", []) if (a.get("symbol") or "").upper() == want),
+        None,
+    )
+    if entry is None:
+        log.debug("registry %s has no %s entry — new round not persisted", fp, symbol)
+        return False
+
+    entry["marketId"] = str(market_id)
+    entry["expiryBlock"] = str(expiry_block)
+    try:
+        tmp = f"{fp}.tmp"
+        with open(tmp, "w", encoding="utf8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, fp)
+    except Exception as e:
+        log.warning("could not write the registry %s (%s) — round not persisted", fp, e)
+        return False
+    return True
+
+
 def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, list[PairConfig]]]:
     """Parse the multi-asset file. Returns `(shared, pairs)`, or `None` when the
     file is absent/empty so the caller can fall back to the single-pair env.
@@ -1466,10 +1514,17 @@ class MarketMakerBot:
         mid = self._market_created_id(receipt)
         if mid is None:
             raise RuntimeError("createMarket: MarketCreated event not found")
-        log.warning(
-            "[%s] NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — update web/.env.local NEXT_PUBLIC_DEMO_MARKET_ID=%s",
-            self.symbol, mid, new_expiry, current_expiry, mid,
-        )
+        if persist_round(self.symbol, mid, new_expiry):
+            log.warning(
+                "[%s] NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — registry updated",
+                self.symbol, mid, new_expiry, current_expiry,
+            )
+        else:
+            log.warning(
+                "[%s] NEXT ROUND: marketId=%s expiryBlock=%s (was %s) — registry NOT updated "
+                "(add this round's marketId to the assets file before restarting)",
+                self.symbol, mid, new_expiry, current_expiry,
+            )
         self.market_id = mid
         # Per-round state reset for the new round: the settlement quote id and the
         # E-quote sweep flag belong to the round that just closed.

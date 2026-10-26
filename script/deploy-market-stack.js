@@ -51,13 +51,13 @@ const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const DECIMALS = 18;
 const QUOTE_NAME = process.env.QUOTE_NAME || "HKD";
 const QUOTE_SYMBOL = process.env.QUOTE_SYMBOL || "HKD";
-const ASSETS_RAW = process.env.ASSETS || "MOUTAI:1500,GLM:2.5,SNDK:88,DEEPSEEK:45,SOXX:514";
+const ASSETS_RAW = process.env.ASSETS || "NVDA:230,DEEPSEEK:45,B300:4.39";
 
 // Per-symbol real-price descriptor merged into deployment-assets.json so the bot knows how to
 // price each asset (docs/design/bot-real-price-feed-spec.md §6.1). Unknown symbols => synthetic.
 const FEED_DESCRIPTORS = {
-  // NVDA is retired from the default set (bot/.env.example BOT_SKIP_SYMBOLS=NVDA)
-  // but kept here so an explicit ASSETS=NVDA:... still prices correctly.
+  // Default demo set is NVDA / DEEPSEEK / B300 (see ASSETS_RAW). The other
+  // symbols stay here so an explicit ASSETS=... still prices correctly.
   NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
   SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
   SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
@@ -66,9 +66,8 @@ const FEED_DESCRIPTORS = {
   MOUTAI: { priceSource: "sina", priceSymbol: "sh600519", assetClass: "stocks" },
   DEEPSEEK: { priceSource: "synthetic" },
   // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless
-  // priceSymbol pins one with `@region` — not exercised by any default entry;
-  // set e.g. priceSymbol: "B300@us-central1" to pin). Opt-in via
-  // ASSETS=B300:<fair> — no token/market exists for these by default.
+  // priceSymbol pins one with `@region`). B300 is the only GPU in the default
+  // set (its rental price); the others are opt-in via ASSETS=<SYMBOL>:<fair>.
   B300: { priceSource: "nebius", priceSymbol: "B300", assetClass: "gpu" },
   B200: { priceSource: "nebius", priceSymbol: "B200", assetClass: "gpu" },
   H200: { priceSource: "nebius", priceSymbol: "H200", assetClass: "gpu" },
