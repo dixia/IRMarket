@@ -98,6 +98,10 @@ class LabelPoisoned(RuntimeError):
 class BudgetExceeded(RuntimeError):
     """The rolling gas budget is spent, so nothing is sent (see _send)."""
 
+
+class PreflightRevert(RuntimeError):
+    """The transaction would revert, so it was not broadcast (see _send)."""
+
 # Upstream Monoracle caps the veto window; a quote whose expiry exceeds block + this reverts
 # `ExpiryTooFar`. Mirror ../monoracle Monoracle.sol (`MAX_VERIFICATION_SLOTS`).
 MAX_VERIFICATION_SLOTS = 12000
@@ -221,6 +225,15 @@ MAX_MON_PER_HOUR = float(os.getenv("MAX_MON_PER_HOUR", "3"))
 MAX_MON_PER_DAY = float(os.getenv("MAX_MON_PER_DAY", "20"))
 SPEND_LOG_EVERY_S = float(os.getenv("SPEND_LOG_EVERY_S", "600"))
 GUARD_STATE_FILE = os.getenv("GUARD_STATE_FILE", "bot/.guard-state.json")
+
+# Pre-flight simulation: `eth_call` the exact transaction before broadcasting it.
+# A permanent failure (the 2026-10-21 class: a withdraw the oracle can never
+# accept) then costs one free RPC instead of a paid revert. It is skipped in the
+# near-expiry band, where the extra round trip could push the final quote past
+# its expiry window — that path is latency-critical and already guarded by the
+# retry/backoff machinery.
+PREFLIGHT_SIMULATE = os.getenv("PREFLIGHT_SIMULATE", "1") == "1"
+PREFLIGHT_WARN_EVERY_S = float(os.getenv("PREFLIGHT_WARN_EVERY_S", "300"))
 
 
 def _load_gas_table() -> dict[str, int]:
@@ -647,6 +660,7 @@ class MarketMakerBot:
         self._revert_state: dict[str, dict[str, Any]] = {}
         self._low_balance_warned = 0.0
         self._budget_warned = 0.0
+        self._preflight_warned = 0.0
         # Id of THIS round's final settlement quote (expiry E + settlement_window_blocks),
         # or None while it has not been submitted. Replaces the old boolean
         # `_final_submitted`: `is None` is the "not submitted yet" gate (step, restart
@@ -798,6 +812,23 @@ class MarketMakerBot:
                     label, self.address, balance / E18, required / E18, MIN_BALANCE_TX_MULT,
                 )
             raise InsufficientBalance(f"{label}: balance {balance} < required {required}")
+
+        # --- guard 4: pre-flight simulation ------------------------------------
+        if PREFLIGHT_SIMULATE and not self._near_expiry():
+            try:
+                fn.call({"from": self.address, "gas": gas, "gasPrice": price})
+            except Exception as e:  # a revert here is caught for free
+                reason = getattr(e, "message", None) or str(e)
+                now = time.time()
+                if now - self._preflight_warned >= PREFLIGHT_WARN_EVERY_S:
+                    self._preflight_warned = now
+                    log.warning(
+                        "%s: pre-flight simulation reverted (%s) — NOT sending; "
+                        "this would have been a paid revert", label, reason,
+                    )
+                else:
+                    log.debug("%s: pre-flight still reverting (%s)", label, reason)
+                raise PreflightRevert(f"{label}: simulation reverted: {reason}") from e
 
         for _ in range(5):
             if self._nonce is None:
@@ -1610,7 +1641,9 @@ class MarketMakerBot:
             time.sleep(NEAR_EXPIRY_POLL_SECONDS if self._near_expiry() else self.poll_seconds)
 
 
-GUARD_SKIPS = (SendBackoff, LabelPoisoned, BudgetExceeded, InsufficientBalance)
+GUARD_SKIPS = (
+    SendBackoff, LabelPoisoned, BudgetExceeded, InsufficientBalance, PreflightRevert,
+)
 
 
 def _log_spend(bots: list["MarketMakerBot"], last: list[float]) -> None:

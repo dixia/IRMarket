@@ -390,6 +390,14 @@ when a quote settles (B12).
   send the wallet cannot fund (`MIN_BALANCE_TX_MULT` head-room) with a throttled
   warning naming the address to fund. `SPEND_LOG_EVERY_S` prints a meter line
   (`MON/h`, `MON/day`, balance, runway). All env-tunable; see `bot/.env.example`.
+  On top of that, each transaction is **simulated with `eth_call` before broadcast**
+  (`PREFLIGHT_SIMULATE`, on by default; skipped in the near-expiry band because the
+  extra round trip is latency-critical there): a would-be revert becomes a free
+  skipped attempt with the revert reason in the log instead of a paid one. Together
+  the four layers mean the 2026-10-21 loop
+  (`docs/incidents/2026-10-21-revert-loop-gas-burn.md`) can no longer be paid for:
+  the call is caught before broadcast, and if it ever slips through, the breaker
+  parks it after 5 attempts and the budget caps the total.
 - **Parallel execution:** per-quote storage (`quotes[]`) touches disjoint slots across ids;
   the wrapper adds no global contention.
 - **Streaming RPC:** `VetoWrapped` + the fork's 5 events drive the indexer/UI; keep params
