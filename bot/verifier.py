@@ -75,6 +75,20 @@ VETOED_OVERPRICED = 2
 SETTLED_VALID = 3
 SETTLED_WITHDRAWN = 4
 
+
+class SendBackoff(RuntimeError):
+    """A send is skipped because the same call keeps reverting (see _send).
+
+    Monad bills the gas LIMIT of a mined tx, so a revert-retry loop is a paid
+    no-op: the Oct 21-22 incident burned ~270 MON that way (~21k reverted
+    `withdrawProviderFunds` txs against the pre-lazy oracle). After
+    REVERT_BACKOFF_AFTER consecutive reverts the call is skipped for an
+    exponentially growing window instead of being retried every loop."""
+
+
+class InsufficientBalance(RuntimeError):
+    """A send is skipped because the wallet cannot fund it (see _send)."""
+
 # Upstream Monoracle caps the veto window; a quote whose expiry exceeds block + this reverts
 # `ExpiryTooFar`. Mirror ../monoracle Monoracle.sol (`MAX_VERIFICATION_SLOTS`).
 MAX_VERIFICATION_SLOTS = 12000
@@ -166,6 +180,19 @@ GAS_DEFAULTS = {
     "withdraw": 150_000,
     "create_market": 218_789,
 }
+
+# --- send guards (P0 of the #33 gas audit) ----------------------------------
+# Monad bills the gas LIMIT of a mined tx, so a revert-retry loop is a paid
+# no-op: that is what burned ~270 MON on 2026-10-21/22 (~21k reverted
+# `withdrawProviderFunds` txs against the pre-lazy oracle, 0.0132 MON each).
+# A label that reverts REVERT_BACKOFF_AFTER times in a row is skipped for an
+# exponentially growing window, and a send the wallet cannot fund is skipped
+# with a loud (throttled) warning instead of failing at the RPC every loop.
+REVERT_BACKOFF_AFTER = int(os.getenv("REVERT_BACKOFF_AFTER", "2"))
+REVERT_BACKOFF_BASE_S = float(os.getenv("REVERT_BACKOFF_BASE_S", "5"))
+REVERT_BACKOFF_MAX_S = float(os.getenv("REVERT_BACKOFF_MAX_S", "300"))
+MIN_BALANCE_TX_MULT = float(os.getenv("MIN_BALANCE_TX_MULT", "3"))
+LOW_BALANCE_WARN_EVERY_S = float(os.getenv("LOW_BALANCE_WARN_EVERY_S", "300"))
 
 
 def _load_gas_table() -> dict[str, int]:
@@ -281,6 +308,21 @@ class BotContext:
         self.pk = os.environ["PRIVATE_KEY"]
         self.account = self.w3.eth.account.from_key(self.pk)
         self.address = self.account.address
+
+        # Wallet balance cache (TTL). `MarketMakerBot._send` consults it before
+        # every send, so a shared TTL turns that into one RPC per `ttl` for the
+        # whole process instead of one per send.
+        self._balance_ts = 0.0
+        self._balance_wei = 0
+
+    def balance_wei(self, ttl: float = 30.0) -> int:
+        """Wallet balance, cached for `ttl` seconds across every pair's bot."""
+        now = time.time()
+        if self._balance_wei and now - self._balance_ts < ttl:
+            return self._balance_wei
+        self._balance_wei = self.w3.eth.get_balance(self.address)
+        self._balance_ts = now
+        return self._balance_wei
 
         # Assets file (when present) is authoritative for the shared addresses;
         # env vars are the fallback so the legacy single-pair setup keeps working.
@@ -482,6 +524,10 @@ class MarketMakerBot:
         self.gas_price_cap = int(os.getenv("GAS_PRICE_CAP_WEI", "0"))  # 0 = use chain
 
         self._nonce = None  # property → the shared BotContext nonce cursor
+        # Send guards (see _send / _note_revert): per-label revert backoff state and
+        # the throttle for the low-balance warning.
+        self._revert_state: dict[str, dict[str, Any]] = {}
+        self._low_balance_warned = 0.0
         # Id of THIS round's final settlement quote (expiry E + settlement_window_blocks),
         # or None while it has not been submitted. Replaces the old boolean
         # `_final_submitted`: `is None` is the "not submitted yet" gate (step, restart
@@ -554,6 +600,18 @@ class MarketMakerBot:
     ) -> Any:
         """Sign + send a tx with manual nonce tracking; retry on nonce races.
 
+        Two guards keep a failing send from burning the wallet (Monad bills the
+        gas LIMIT of a mined tx, so a mined revert costs the full limit):
+
+          * **revert backoff** — a label that reverts REVERT_BACKOFF_AFTER times
+            in a row is skipped for an exponentially growing window
+            (5 s -> 300 s cap) instead of being retried every loop. This is what
+            the Oct 21-22 incident needed: ~21k reverted `withdrawProviderFunds`
+            txs, ~270 MON, all of them no-ops.
+          * **balance floor** — if the wallet cannot fund MIN_BALANCE_TX_MULT x
+            this tx, the send is skipped and a (throttled) warning names the
+            address to fund, instead of failing at the RPC once per loop.
+
         Emits one DEBUG `[latency]` line per attempt with the three checkpoints the
         delivery-latency probe needs:
           - decision: the head read (`decision_block`) + wall clock used to decide
@@ -563,6 +621,31 @@ class MarketMakerBot:
         `dt_send_s` isolates the bot's own processing from the network's inclusion
         delay (`post_send_gap_blocks`); `incl_gap_blocks` is the sum of the two.
         """
+        # --- guard 1: revert backoff -------------------------------------------
+        state = self._revert_state.get(label)
+        if state is not None and time.time() < state["until"]:
+            raise SendBackoff(
+                f"{label}: {state['fails']} consecutive reverts, "
+                f"{state['until'] - time.time():.0f}s of backoff left "
+                f"(~{state['wasted'] / E18:.4f} MON already burned on this call)"
+            )
+
+        price = self._gas_price()
+
+        # --- guard 2: balance floor --------------------------------------------
+        required = int(gas * price * MIN_BALANCE_TX_MULT)
+        balance = self.ctx.balance_wei()
+        if balance < required:
+            now = time.time()
+            if now - self._low_balance_warned >= LOW_BALANCE_WARN_EVERY_S:
+                self._low_balance_warned = now
+                log.warning(
+                    "%s: wallet %s holds %.4f MON, this tx needs ~%.4f MON "
+                    "(x%s head-room) — skipping until it is funded",
+                    label, self.address, balance / E18, required / E18, MIN_BALANCE_TX_MULT,
+                )
+            raise InsufficientBalance(f"{label}: balance {balance} < required {required}")
+
         for _ in range(5):
             if self._nonce is None:
                 self._sync_nonce()
@@ -571,7 +654,7 @@ class MarketMakerBot:
                     "from": self.address,
                     "nonce": self._nonce,
                     "gas": gas,
-                    "gasPrice": self._gas_price(),
+                    "gasPrice": price,
                     # Pin it: without this web3's TRANSACTION_DEFAULTS fills chainId in
                     # by spending one more `eth_chainid` per send.
                     "chainId": self.ctx.chain_id,
@@ -600,11 +683,38 @@ class MarketMakerBot:
                 # cursor so the next send does not reuse it (that would pay for a second
                 # failed attempt before the nonce-race recovery kicks in).
                 self._nonce += 1
+                self._note_revert(label, gas, price, h.hex())
                 raise RuntimeError(f"{label}: tx reverted {h.hex()}")
             self._nonce += 1
+            self._revert_state.pop(label, None)  # healthy again — clear the backoff
             log.info("%s ok (gas %s) %s", label, receipt.gasUsed, h.hex())
             return receipt
         raise RuntimeError(f"{label}: nonce sync exhausted")
+
+    def _note_revert(self, label: str, gas: int, price: int, tx_hash: str) -> None:
+        """Record a reverted send and arm the backoff once it repeats.
+
+        Logs the MON already spent on this label so a loop is visible in the log
+        instead of only on the balance curve."""
+        state = self._revert_state.setdefault(label, {"fails": 0, "wasted": 0, "until": 0.0})
+        state["fails"] += 1
+        state["wasted"] += gas * price
+        if state["fails"] < REVERT_BACKOFF_AFTER:
+            log.warning(
+                "%s: reverted (tx %s) — attempt %d, ~%.4f MON spent on this call so far",
+                label, tx_hash, state["fails"], state["wasted"] / E18,
+            )
+            return
+        backoff = min(
+            REVERT_BACKOFF_BASE_S * (2 ** (state["fails"] - REVERT_BACKOFF_AFTER)),
+            REVERT_BACKOFF_MAX_S,
+        )
+        state["until"] = time.time() + backoff
+        log.warning(
+            "%s: reverted (tx %s) — attempt %d, ~%.4f MON spent on this call; "
+            "backing off %.0fs (fix the cause, this is not retryable)",
+            label, tx_hash, state["fails"], state["wasted"] / E18, backoff,
+        )
 
     def _log_latency(
         self,

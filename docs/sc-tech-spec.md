@@ -376,6 +376,16 @@ when a quote settles (B12).
   outside 120–400% of measured usage, which is the tripwire that keeps the table honest.
   Every bot limit is overridable with `GAS_<OP>_WEI` so it can be bumped without a
   code change.
+
+  **Send guards (P0 of the #33 gas audit):** because the limit is the price, a mined
+  revert is a *paid* no-op — on 2026-10-21/22 the bot burned ~270 MON in 17 h on ~21k
+  reverted `withdrawProviderFunds` txs (0.0132 MON each), retried every loop. `_send`
+  now (a) backs off exponentially once a call label reverts `REVERT_BACKOFF_AFTER`
+  times (5 s → 300 s, capped) and logs the MON already spent on that label, and
+  (b) skips a send the wallet cannot fund (`MIN_BALANCE_TX_MULT` head-room) with a
+  throttled warning naming the address to fund. A successful send clears the backoff.
+  Both are env-tunable (`REVERT_BACKOFF_*`, `MIN_BALANCE_TX_MULT`,
+  `LOW_BALANCE_WARN_EVERY_S`); see `bot/.env.example`.
 - **Parallel execution:** per-quote storage (`quotes[]`) touches disjoint slots across ids;
   the wrapper adds no global contention.
 - **Streaming RPC:** `VetoWrapped` + the fork's 5 events drive the indexer/UI; keep params
