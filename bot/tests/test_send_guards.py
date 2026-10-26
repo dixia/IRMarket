@@ -31,8 +31,18 @@ E18 = verifier.E18
 
 
 class FakeFn:
+    def __init__(self, call_error=None):
+        self.call_error = call_error
+        self.calls = 0
+
     def build_transaction(self, params):
         return {"fake": True, **params}
+
+    def call(self, params=None):
+        self.calls += 1
+        if self.call_error is not None:
+            raise self.call_error
+        return True
 
 
 class FakeAccount:
@@ -95,6 +105,9 @@ def make_bot(statuses=(1,), balance=10 * E18, nonce=7, state_file=""):
     bot._revert_state = {}
     bot._low_balance_warned = 0.0
     bot._budget_warned = 0.0
+    bot._preflight_warned = 0.0
+    bot._last_head = None
+    bot._last_expiry = None
     bot._log_latency = lambda *a, **k: None  # latency probe is not under test
     return bot
 
@@ -224,6 +237,56 @@ class SpendBudgetTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             bot._send(FakeFn(), 129_367, "withdraw q11")
         self.assertEqual(bot.ctx.spend_since(60), 129_367 * 102 * 10**9)
+
+
+class PreflightSimulationTest(unittest.TestCase):
+    """A would-be revert must be caught by `eth_call`, not paid for on-chain."""
+
+    def test_simulation_revert_is_not_broadcast(self):
+        bot = make_bot()
+        fn = FakeFn(call_error=Exception("execution reverted: NotWithdrawable"))
+        with self.assertRaises(verifier.PreflightRevert):
+            bot._send(fn, 129_367, "withdraw q11")
+        self.assertEqual(bot.w3.eth.sent, [], "nothing may be broadcast")
+        self.assertEqual(bot.ctx.spend_since(60), 0, "a caught revert must cost nothing")
+        self.assertEqual(fn.calls, 1)
+
+    def test_simulation_runs_before_an_ok_send(self):
+        bot = make_bot()
+        fn = FakeFn()
+        bot._send(fn, 129_367, "withdraw q11")
+        self.assertEqual(fn.calls, 1)
+        self.assertEqual(len(bot.w3.eth.sent), 1)
+
+    def test_simulation_is_skipped_in_the_near_expiry_band(self):
+        bot = make_bot()
+        bot._last_head = 1000
+        bot._last_expiry = 1000  # inside the near-expiry band
+        fn = FakeFn(call_error=Exception("execution reverted"))
+        bot._send(fn, 129_367, "final settlement quote")
+        self.assertEqual(fn.calls, 0, "latency-critical path must not spend an extra RPC")
+        self.assertEqual(len(bot.w3.eth.sent), 1)
+
+    def test_simulation_can_be_disabled(self):
+        old = verifier.PREFLIGHT_SIMULATE
+        verifier.PREFLIGHT_SIMULATE = False
+        try:
+            bot = make_bot()
+            fn = FakeFn(call_error=Exception("execution reverted"))
+            bot._send(fn, 129_367, "withdraw q11")
+            self.assertEqual(fn.calls, 0)
+            self.assertEqual(len(bot.w3.eth.sent), 1)
+        finally:
+            verifier.PREFLIGHT_SIMULATE = old
+
+    def test_repeated_simulation_failures_do_not_crash_the_loop(self):
+        bot = make_bot()
+        fn = FakeFn(call_error=Exception("execution reverted: NotWithdrawable"))
+        for _ in range(3):
+            with self.assertRaises(verifier.PreflightRevert):
+                bot._send(fn, 129_367, "withdraw q11")
+        self.assertEqual(bot.w3.eth.sent, [])
+        self.assertGreater(bot._preflight_warned, 0)
 
 
 class BalanceGuardTest(unittest.TestCase):

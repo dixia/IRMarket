@@ -80,6 +80,7 @@ is the authoritative figure.
 
 | layer | env | effect |
 |---|---|---|
+| pre-flight simulation | `PREFLIGHT_SIMULATE`, `PREFLIGHT_WARN_EVERY_S` | `eth_call` the exact tx first: a permanent failure costs one free RPC, not a paid revert (skipped in the near-expiry band) |
 | revert backoff | `REVERT_BACKOFF_*` | same label skipped for 5 s → 300 s after 2 reverts; the MON already spent on the label is logged |
 | circuit breaker | `MAX_CONSECUTIVE_REVERTS`, `POISON_COOLDOWN_S` | label parked after 5 reverts (ERROR), so a capped backoff cannot leak one attempt per window forever |
 | spend budget | `MAX_MON_PER_HOUR`, `MAX_MON_PER_DAY` | rolling ledger (`gas × gasPrice`); nothing is sent once a cap is hit |
