@@ -33,7 +33,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      # The feed parsers/tests are stdlib-only (no web3/requests needed).
+      # The feed parsers are stdlib-only, but bot/verifier.py (and its tests) import
+      # web3 + python-dotenv at module level, so the job installs bot/requirements.txt.
+      - name: Install dependencies
+        run: pip install -r bot/requirements.txt
       - name: Compile
         run: python -m py_compile bot/price_feed.py bot/verifier.py
       - name: Tests
