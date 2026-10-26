@@ -45,7 +45,7 @@ contract that quotes and settles):
 | Role | Who | What they may do |
 |---|---|---|
 | Market creator | Anyone (permissionless, `开市权` D-07) | `createMarket` for any token pair; multiple markets per pair allowed (D-14) |
-| Market maker / provider (bot) | Bot EOA | `submitQuote(..., expiryBlock)` per market round (bilateral collateral) → `settleValidQuote` after expiry → `withdrawProviderFunds`; absorbs P&L as the mirror of users (zero-sum, D-10) |
+| Market maker / provider (bot) | Bot EOA | `submitQuote(..., expiryBlock)` per market round (bilateral collateral) → `withdrawProviderFunds` after expiry (+ one `settleValidQuote` checkpoint per round, for the settlement quote, to refresh `latestValidQuoteId[pair]`); absorbs P&L as the mirror of users (zero-sum, D-10) |
 | Trader (any wallet) | Anyone | Directly `vetoUnderpriced`/`vetoOverpriced` on any ACTIVE quote (any provider, D-15), or via the wrapper (fee'd) |
 | Monoracle (self-deployed) | IRMarket-owned fork | The trading venue & price source; derived from upstream Monoracle |
 
@@ -302,8 +302,11 @@ arbitrary partial fill; arbitrary sizes would require fractional-veto support (o
    `quote.expiryBlock == market.expiryBlock` — **never by pair alone**. Mid-round bots manage
    one round and must not touch an expired round's quotes, and a stale `marketId` must not
    re-settle the live round's quotes. (This scoping bug crashed the bot once.)
-4. Un-vetoed quotes settle after expiry: `settleValidQuote` — **in order, oldest first,
-   the round's final quote LAST**, so the canonical price = 终价 (D-06, B12).
+4. Un-vetoed quotes become canonical **automatically** at expiry (lazy settlement): no settle
+   tx and no ordering — `getLatestPrice` derives the mark at read time. The bot therefore only
+   **withdraws** them (`withdrawProviderFunds` backfills `settledSlot = expiryBlock`, keeping the
+   quote a canonical candidate in the walk). The single `settleValidQuote` it still sends is for
+   the round's settlement quote, to refresh `latestValidQuoteId[pair]` — the walk's fallback floor.
 5. `withdrawProviderFunds` to recycle collateral (B7/B12) → next round, configurable
    interval (`QUOTE_INTERVAL_SECONDS/BLOCKS`).
 6. **Capital note (B12):** un-vetoed quotes lock collateral until expiry; bot budget =
@@ -497,8 +500,10 @@ when a quote settles (B12).
     base — **this is the LONG trade**. Status → `VETOED_UNDERPRICED`.
   - `vetoOverpriced(quoteId)`: verifier pays `baseAmount` base, receives `quoteAmount`
     quote — **this is the SHORT trade**. Status → `VETOED_OVERPRICED`.
-  - `settleValidQuote(quoteId)`: permissionless, after `expiryBlock` ⇒ canonical
-    (`latestValidQuoteId[pair]`); `getLatestPrice` reads it.
+  - `settleValidQuote(quoteId)`: permissionless, after `expiryBlock` — an **optional
+    checkpoint** under lazy settlement (writes `latestValidQuoteId[pair]`, emits
+    `QuoteSettledValid`); the mark itself is derived at read time, so it neither gates nor
+    rewrites it.
   - `withdrawProviderFunds(quoteId)`: provider-only; valid ⇒ 1× back, underpriced veto ⇒
     2×quote, overpriced veto ⇒ 2×base (zero-sum with the vetoing trader).
   - Public `quotes(quoteId)` getter returns zero struct for unknown ids (callers treat
