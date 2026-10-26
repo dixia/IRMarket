@@ -119,11 +119,12 @@ function loadJson(file) {
 function parseAssets(raw) {
   const out = [];
   for (const entry of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
-    const [symbol, pricePart = "1"] = entry.split(":");
+    const [symbol, pricePart = "1", quotePart] = entry.split(":");
     if (!symbol) throw new Error(`Invalid ASSETS entry: "${entry}"`);
     const units = Number(pricePart);
     if (!Number.isFinite(units) || units <= 0) throw new Error(`Invalid fair price in "${entry}"`);
-    out.push({ symbol: symbol.trim().toUpperCase(), name: symbol.trim(), fairPrice: ethers.parseEther(String(units)) });
+    const quoteSymbol = (quotePart || DEFAULT_QUOTE).trim().toUpperCase();
+    out.push({ symbol: symbol.trim().toUpperCase(), name: symbol.trim(), fairPrice: ethers.parseEther(String(units)), quoteSymbol });
   }
   if (out.length === 0) throw new Error("ASSETS is empty");
   return out;
