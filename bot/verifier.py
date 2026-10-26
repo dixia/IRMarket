@@ -286,6 +286,8 @@ class PairConfig:
         price_symbol: Optional[str] = None,
         asset_class: Optional[str] = None,
         fx_quote_per_usd: Optional[float] = None,
+        price_currency: Optional[str] = None,
+        quote_currency: Optional[str] = None,
     ) -> None:
         self.base_token = base_token
         self.quote_token = quote_token
@@ -299,6 +301,11 @@ class PairConfig:
         self.price_symbol = price_symbol
         self.asset_class = asset_class
         self.fx_quote_per_usd = fx_quote_per_usd
+        # Currency of the feed's native price and of the market's quote token.
+        # Different => the bot converts with the live USD<->HKD rate (price_feed
+        # FxProvider); equal (the normal case) => no conversion, no FX call.
+        self.price_currency = price_currency
+        self.quote_currency = quote_currency
 
 
 class BotContext:
@@ -563,8 +570,10 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
         "oracle": data.get("oracle"),
         "market": data.get("market"),
         "quoteToken": data.get("quoteToken"),
+        "quoteTokens": data.get("quoteTokens") or {},
     }
     shared_quote = shared.get("quoteToken")
+    default_quote_symbol = (data.get("quoteSymbol") or "HKD").upper()
     pairs: list[PairConfig] = []
     for i, a in enumerate(assets):
         quote_token = a.get("quoteToken") or shared_quote
@@ -582,6 +591,8 @@ def load_asset_configs(explicit: Optional[str] = None) -> Optional[tuple[dict, l
                 price_symbol=a.get("priceSymbol"),
                 asset_class=a.get("assetClass"),
                 fx_quote_per_usd=a.get("fxQuotePerUsd"),
+                price_currency=a.get("priceCurrency"),
+                quote_currency=(a.get("quoteSymbol") or default_quote_symbol),
             )
         )
     pairs = _apply_skip_symbols(pairs)
