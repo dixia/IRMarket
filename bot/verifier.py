@@ -350,6 +350,33 @@ class BotContext:
         self.account = self.w3.eth.account.from_key(self.pk)
         self.address = self.account.address
 
+        # Assets file (when present) is authoritative for the shared addresses;
+        # env vars are the fallback so the legacy single-pair setup keeps working.
+        oracle_addr = shared.get("oracle") or os.getenv("ORACLE_ADDRESS")
+        market_addr = shared.get("market") or os.getenv("MARKET_ADDRESS")
+        if not oracle_addr or not market_addr:
+            raise RuntimeError("ORACLE_ADDRESS and MARKET_ADDRESS must be set")
+        self.oracle_addr = Web3.to_checksum_address(oracle_addr)
+        self.market_addr = Web3.to_checksum_address(market_addr)
+        self.oracle = self.w3.eth.contract(
+            address=self.oracle_addr, abi=_load_abi("abi/Monoracle.abi.json")
+        )
+        self.market = self.w3.eth.contract(
+            address=self.market_addr,
+            abi=_load_abi("artifacts/contracts/IRMarket.sol/IRMarket.json"),
+        )
+        # Multicall3 (n3) at the canonical address on Monad testnet — the same one
+        # web/src/lib/wagmi.ts points at. Used to batch the per-step reads; when it
+        # is absent (or the call fails) every reader falls back to plain eth_calls.
+        self.multicall3 = self.w3.eth.contract(
+            address=Web3.to_checksum_address(
+                os.getenv("MULTICALL3_ADDRESS", "0xcA11bde05977b3631167028862bE2a173976CA11")
+            ),
+            abi=MULTICALL3_ABI,
+        )
+
+        self.nonce: Optional[int] = None
+
         # Wallet balance cache (TTL). `MarketMakerBot._send` consults it before
         # every send, so a shared TTL turns that into one RPC per `ttl` for the
         # whole process instead of one per send.
@@ -454,33 +481,6 @@ class BotContext:
         self._poisoned[label] = until
         self._save_guard_state()
         return until
-
-        # Assets file (when present) is authoritative for the shared addresses;
-        # env vars are the fallback so the legacy single-pair setup keeps working.
-        oracle_addr = shared.get("oracle") or os.getenv("ORACLE_ADDRESS")
-        market_addr = shared.get("market") or os.getenv("MARKET_ADDRESS")
-        if not oracle_addr or not market_addr:
-            raise RuntimeError("ORACLE_ADDRESS and MARKET_ADDRESS must be set")
-        self.oracle_addr = Web3.to_checksum_address(oracle_addr)
-        self.market_addr = Web3.to_checksum_address(market_addr)
-        self.oracle = self.w3.eth.contract(
-            address=self.oracle_addr, abi=_load_abi("abi/Monoracle.abi.json")
-        )
-        self.market = self.w3.eth.contract(
-            address=self.market_addr,
-            abi=_load_abi("artifacts/contracts/IRMarket.sol/IRMarket.json"),
-        )
-        # Multicall3 (n3) at the canonical address on Monad testnet — the same one
-        # web/src/lib/wagmi.ts points at. Used to batch the per-step reads; when it
-        # is absent (or the call fails) every reader falls back to plain eth_calls.
-        self.multicall3 = self.w3.eth.contract(
-            address=Web3.to_checksum_address(
-                os.getenv("MULTICALL3_ADDRESS", "0xcA11bde05977b3631167028862bE2a173976CA11")
-            ),
-            abi=MULTICALL3_ABI,
-        )
-
-        self.nonce: Optional[int] = None
 
 
 def _resolve_assets_path(explicit: Optional[str] = None) -> Path:
