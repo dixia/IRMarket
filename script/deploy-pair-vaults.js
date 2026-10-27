@@ -26,6 +26,7 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { chainInfo, resolveRegistryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -52,7 +53,9 @@ if (!process.env.PRIVATE_KEY && !DRY_RUN) {
 const loadArtifact = (rel) => JSON.parse(fs.readFileSync(path.join(rootDir, "artifacts", "contracts", rel), "utf8"));
 
 async function main() {
-  const registryPath = path.join(rootDir, process.env.ASSETS_FILE || "deployment-assets.json");
+  const registryPath = process.env.ASSETS_FILE
+    ? path.join(rootDir, process.env.ASSETS_FILE)
+    : resolveRegistryFile(rootDir, "assets", CHAIN_ID);
   const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   const oracleAddr = process.env.ORACLE_ADDRESS || registry.oracle;
   if (!oracleAddr) throw new Error("no oracle in the registry and ORACLE_ADDRESS is unset");
@@ -72,7 +75,7 @@ async function main() {
   console.log(`factory ${FACTORY_ADDRESS} (oracle ${factoryOracle})`);
   console.log(`seeds: ${SEEDS.USD} per USD pair, ${SEEDS.HKD} per HKD pair\n`);
 
-  const out = { network: "monad-testnet", chainId: CHAIN_ID, factory: FACTORY_ADDRESS, oracle: factoryOracle, vaults: {} };
+  const out = { network: chainInfo(CHAIN_ID).slug, chainId: CHAIN_ID, factory: FACTORY_ADDRESS, oracle: factoryOracle, vaults: {} };
 
   for (const asset of registry.assets) {
     const base = asset.baseToken;
@@ -132,7 +135,7 @@ async function main() {
   }
 
   if (!DRY_RUN) {
-    const file = path.join(rootDir, "deployment-vaults.json");
+    const file = resolveRegistryFile(rootDir, "vaults", CHAIN_ID);
     fs.writeFileSync(file, JSON.stringify(out, null, 2));
     console.log(`\n=== wrote ${path.basename(file)} (${Object.keys(out.vaults).length} pair vaults) ===`);
   } else {

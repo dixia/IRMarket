@@ -54,6 +54,8 @@ const REGISTRY_STEMS = {
   deployment: "deployment",
   assets: "deployment-assets",
   vault: "deployment-vault",
+  vaults: "deployment-vaults",
+  factory: "deployment-factory",
 };
 
 function stemFor(kind) {
