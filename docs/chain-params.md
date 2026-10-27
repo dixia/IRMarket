@@ -20,8 +20,10 @@ Registries are chain-scoped so two chains never share token/market addresses:
 
 ```
 deployment.<slug>.json          # wrapper + base/quote + marketId
-deployment-assets.<slug>.json   # the token book (per-symbol base tokens + HKD)
-deployment-vault.<slug>.json    # LP vault bindings
+deployment-assets.<slug>.json   # the token book (per-symbol base tokens + quote tokens)
+deployment-vault.<slug>.json    # single-vault bindings (legacy MVP shape)
+deployment-vaults.<slug>.json   # one entry per pair, from IRMarketVaultFactory
+deployment-factory.<slug>.json  # the vault factory (oracle-bound) + MAX_FEE_BPS
 ```
 
 The legacy unsuffixed names (`deployment.json`, `deployment-assets.json`,
@@ -113,6 +115,40 @@ is re-derived on restart.
 
 Observed gas price during deploy was **160 wei/gas**, so the whole stack cost ~2.4 gwei of AVAX,
 far below the conservative 1 AVAX budget.
+
+### 4-pair USD/HKD cutover + per-pair vaults (2026-10-27)
+
+The Fuji stack now mirrors Monad: the same four pairs, the USD quote token, the permissionless
+vault factory and one seeded vault per pair (replaces the single NVDA vault as the LP story).
+Markets are new rounds (`MOUTAI/HKD` 2234, `DEEPSEEK/HKD` 2235, `ASHR/USD` 2236, `B300/USD` 2237);
+the older NVDA/GLM/SNDK/B200/H200/H100 token contracts stay on chain but left the registry.
+
+| Contract | Address |
+|---|---|
+| USD quote (MockERC20, 18 dp) | `0xF57F61Dc9d0B1c4A3Ec786c602019bD8AeF5a4BF` |
+| MOUTAI base | `0xc5A045eF2cdf1d4946a31D6635dEE0855C35D2A4` |
+| ASHR base | `0x1e33d89e8c342D849A5D32aB8711a3A242fD40E8` |
+| IRMarketVaultFactory | `0xFaB2e376fcF5D2BFf84b2cA4aef4b7b893faF27F` |
+
+| Pair | vault | seed |
+|---|---|---|
+| MOUTAI/HKD | `0x040646f08c222FAD95a0b8Baf584854c65DAcfe1` | 7,000,000 HKD |
+| DEEPSEEK/HKD | `0x37D6d755CC50680016CA96642E325ec2e4784F75` | 7,000,000 HKD |
+| ASHR/USD | `0xd2De27c3Fe8f3639751DD2400E28511768789EfA` | 1,000,000 USD |
+| B300/USD | `0x70e66898fbb8750b4FBF1364C55EEa738e891807` | 1,000,000 USD |
+
+Deploy path (all chain-aware, `CHAIN_ID=43113 RPC_URL=https://api.avax-test.network/ext/bc/C/rpc`):
+
+```bash
+node script/deploy-market-stack.js --skip-vault     # wrapper reuse, USD+HKD quotes, 4 rounds
+node script/deploy-vault-factory.js                  # idempotent; writes deployment-factory.<slug>.json
+FACTORY_ADDRESS=$(node -p "require('./deployment-factory.avalanche-fuji.json').factory") \
+  node script/deploy-pair-vaults.js                  # create-if-absent + seed (SEED_USD/SEED_HKD)
+```
+
+Web: the `irmarket-avax` project carries `NEXT_PUBLIC_FACTORY_ADDRESS` plus the four base tokens in
+`NEXT_PUBLIC_SELECTED_BASE_TOKENS`; the vault page lists the factory's vaults.
+
 
 ### Fuji video walkthrough
 

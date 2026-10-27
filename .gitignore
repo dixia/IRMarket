@@ -28,6 +28,7 @@ deployment-vault.json
 deployment.*.json
 deployment-vault*.json
 deployment-assets*.json
+deployment-factory*.json
 .next/
 bot/.env
 bot/.env.*
