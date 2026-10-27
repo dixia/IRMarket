@@ -8,7 +8,8 @@ import { useVaultSettledPayouts } from "@/hooks/useVaultSettled";
 import { useVaultTrade } from "@/hooks/useVaultTrade";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { VaultSide, VaultStatus, vaultPayoutAt, vaultPnlAt } from "@/lib/vault";
-import { formatAmount, formatCountdown, formatPnl, formatPrice } from "@/lib/format";
+import { formatAmount, formatPnl, formatPrice } from "@/lib/format";
+import { formatCountdown } from "@/lib/countdown";
 import { TxStatusCard, mapTransactionError, type TxState } from "@/components/common/TxStatusCard";
 
 export function VaultPositionsList({ account }: { account?: `0x${string}` }) {

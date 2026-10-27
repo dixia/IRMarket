@@ -15,6 +15,7 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { resolveRegistryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -28,7 +29,7 @@ const amount = ethers.parseEther((AMOUNT_RAW || "100000").replace(/e18$|E18$/, "
 
 const RPC_URL = process.env.RPC_URL || "https://testnet-rpc.monad.xyz";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
-const assetsFile = process.env.ASSETS_FILE || "deployment-assets.json";
+const assetsFile = process.env.ASSETS_FILE || resolveRegistryFile(rootDir, "assets", CHAIN_ID);
 const symbolFilter = (process.env.ASSETS || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 
 if (!RECIPIENT) {
@@ -39,8 +40,13 @@ if (!RECIPIENT) {
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 if (!PRIVATE_KEY && !DRY_RUN) { console.error("Set PRIVATE_KEY (the funder) or use --dry-run"); process.exit(1); }
 
-const registry = JSON.parse(fs.readFileSync(path.join(rootDir, assetsFile), "utf8"));
+const registryPath = path.isAbsolute(assetsFile) ? assetsFile : path.join(rootDir, assetsFile);
+const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 if (!registry?.assets?.length) { console.error(`${assetsFile} has no assets — deploy the market stack first`); process.exit(1); }
+if (registry.chainId !== undefined && Number(registry.chainId) !== CHAIN_ID) {
+  console.error(`registry ${assetsFile} is for chain ${registry.chainId}, not ${CHAIN_ID} — refusing to mint`);
+  process.exit(1);
+}
 
 const tokens = [{ symbol: "HKD", token: registry.quoteToken },
   ...registry.assets.map((a) => ({ symbol: a.symbol, token: a.baseToken }))]

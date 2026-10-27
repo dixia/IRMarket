@@ -3,21 +3,42 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { chainInfo, blockSeconds, registryFile } from "./networks.js";
+import { sameChain } from "./stack-reuse.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
-const OUT_FILE = path.join(rootDir, "deployment-assets.json");
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 const RPC_URL = process.env.RPC_URL || "https://testnet-rpc.monad.xyz";
 const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
+const OUT_FILE = path.join(rootDir, registryFile("assets", CHAIN_ID));
 const FEE_BPS = Number(process.env.FEE_BPS || 100);
 const EXPIRY_SECONDS = Number(process.env.EXPIRY_SECONDS || 1800);
 const ASSET_NAME_PREFIX = process.env.ASSET_NAME_PREFIX || "";
 const ASSETS_RAW = process.env.ASSETS || "NVDA:130,GLM:1,SNDK:50";
 
-const BLOCK_SECONDS = 0.3;
+// Per-symbol real-price descriptor written into the registry so the bot knows how to price
+// the asset (docs/design/bot-real-price-feed-spec.md §6.1). Keep in sync with
+// script/deploy-market-stack.js FEED_DESCRIPTORS; unknown symbols => synthetic.
+const FEED_DESCRIPTORS = {
+  NVDA: { priceSource: "nasdaq", priceSymbol: "NVDA", assetClass: "stocks" },
+  SNDK: { priceSource: "nasdaq", priceSymbol: "SNDK", assetClass: "stocks" },
+  SOXX: { priceSource: "nasdaq", priceSymbol: "SOXX", assetClass: "etf" },
+  GLM: { priceSource: "sina", priceSymbol: "hk02513", assetClass: "stocks" },
+  DEEPSEEK: { priceSource: "synthetic" },
+  // Nebius spot GPU prices (USD per GPU-hour; lowest across regions unless priceSymbol
+  // pins one with `@region`, e.g. "B300@us-central1").
+  B300: { priceSource: "nebius", priceSymbol: "B300", assetClass: "gpu" },
+  B200: { priceSource: "nebius", priceSymbol: "B200", assetClass: "gpu" },
+  H200: { priceSource: "nebius", priceSymbol: "H200", assetClass: "gpu" },
+  H100: { priceSource: "nebius", priceSymbol: "H100", assetClass: "gpu" },
+  "RTX PRO 6000": { priceSource: "nebius", priceSymbol: "RTX PRO 6000", assetClass: "gpu" },
+};
+const feedDescriptor = (symbol) => FEED_DESCRIPTORS[symbol] || { priceSource: "synthetic" };
+
+const BLOCK_SECONDS = blockSeconds(CHAIN_ID);
 const MINT_BASE = ethers.parseEther("1000000");
 const MIN_QUOTE = ethers.parseEther("1000000");
 const MAX_UINT = ethers.MaxUint256;
@@ -53,7 +74,16 @@ function parseAssets(raw) {
 
 function loadExisting() {
   if (!fs.existsSync(OUT_FILE)) return null;
-  try { return JSON.parse(fs.readFileSync(OUT_FILE, "utf8")); } catch { return null; }
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(OUT_FILE, "utf8")); } catch { return null; }
+  // Never merge into another chain's registry (script/stack-reuse.js sameChain): its
+  // token/market addresses are meaningless here and a merge would advertise them.
+  if (!sameChain(parsed, CHAIN_ID)) {
+    console.warn(`  ! ${path.basename(OUT_FILE)} is for chain ${parsed?.chainId ?? "(none)"}; ` +
+      `this run targets ${CHAIN_ID} (${chainInfo(CHAIN_ID).slug}) -> ignoring it`);
+    return null;
+  }
+  return parsed;
 }
 
 function printPlan(assets, existing) {
@@ -106,7 +136,7 @@ async function main() {
 
   console.log("=== Deploy Multi-Asset Markets ===");
   console.log(`Deployer: ${addr}`);
-  console.log(`Balance:  ${ethers.formatEther(await provider.getBalance(addr))} MON`);
+  console.log(`Balance:  ${ethers.formatEther(await provider.getBalance(addr))} ${chainInfo(CHAIN_ID).symbol}`);
   console.log(`Market:   ${marketAddr}`);
   console.log(`Oracle:   ${oracleAddr}`);
   console.log(`Quote:    ${quoteAddr}`);
@@ -120,15 +150,26 @@ async function main() {
   const market = new ethers.Contract(marketAddr, marketAbi, wallet);
 
   async function send(label, gasLimit, buildTx) {
-    try {
-      const tx = await buildTx({ nonce, gasLimit });
-      nonce += 1n;
-      console.log(`  ${label}: ${tx.hash}`);
-      await tx.wait();
-      return tx;
-    } catch (e) {
-      nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
-      throw e;
+    // The bot may be live on this wallet: it sends from the same account, so a nonce can
+    // be consumed between our `pending` read and our send. Resync and retry instead of
+    // aborting a half-finished deployment (verifier.py `_send` does the same).
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const tx = await buildTx({ nonce, gasLimit });
+        nonce += 1n;
+        console.log(`  ${label}: ${tx.hash}`);
+        await tx.wait();
+        return tx;
+      } catch (e) {
+        const msg = (e.shortMessage || e.message || "").toLowerCase();
+        if (attempt < 5 && msg.includes("nonce")) {
+          nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
+          console.log(`  ${label}: nonce race, resynced to ${nonce} (retry ${attempt})`);
+          continue;
+        }
+        nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
+        throw e;
+      }
     }
   }
 
@@ -166,11 +207,25 @@ async function main() {
       base = new ethers.Contract(baseToken, mockArtifact.abi, wallet);
       console.log(`  baseToken (reused): ${baseToken}`);
     } else {
-      base = await factory.deploy(asset.name, asset.symbol, 18, { nonce, gasLimit: GAS.deployToken });
-      nonce += 1n;
-      baseToken = base.target;
-      console.log(`  deploy ${asset.name} (${asset.symbol}): ${baseToken}`);
-      await base.waitForDeployment();
+      for (let attempt = 1; ; attempt++) {
+        try {
+          base = await factory.deploy(asset.name, asset.symbol, 18, { nonce, gasLimit: GAS.deployToken });
+          nonce += 1n;
+          baseToken = base.target;
+          console.log(`  deploy ${asset.name} (${asset.symbol}): ${baseToken}`);
+          await base.waitForDeployment();
+          break;
+        } catch (e) {
+          const msg = (e.shortMessage || e.message || "").toLowerCase();
+          if (attempt < 5 && msg.includes("nonce")) {
+            nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
+            console.log(`  deploy ${asset.symbol}: nonce race, resynced to ${nonce} (retry ${attempt})`);
+            continue;
+          }
+          nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
+          throw e;
+        }
+      }
     }
 
     const bal = await base.balanceOf(addr);
@@ -198,21 +253,37 @@ async function main() {
       fairPrice: asset.fairPrice.toString(),
       marketId,
       expiryBlock: expiryBlock.toString(),
+      ...feedDescriptor(asset.symbol),
     });
   }
 
+  // MERGE, don't replace: adding an asset must not drop the pairs already listed in this
+  // chain's registry (the bot reads the registry to decide WHAT to quote, so a replace run
+  // with `ASSETS=B300:…` would silently retire NVDA/GLM/SNDK/DEEPSEEK). Existing entries
+  // keep their position and any fields this script does not write (e.g. `vault`); listed
+  // symbols are replaced by this run's fresh token/market row, new symbols are appended.
+  const existingAssets = existing?.assets || [];
+  const fresh = new Map(results.map(r => [r.symbol, r]));
+  const merged = existingAssets.map(a => fresh.get(a.symbol) || a);
+  for (const r of results) {
+    if (!existingAssets.some(a => a.symbol === r.symbol)) merged.push(r);
+  }
+  const dropped = existingAssets.filter(a => !fresh.has(a.symbol)).map(a => a.symbol);
+
   const out = {
-    network: "monad-testnet",
+    network: chainInfo(CHAIN_ID).slug,
     chainId: CHAIN_ID,
     oracle: oracleAddr,
     market: marketAddr,
     quoteToken: quoteAddr,
-    assets: results,
+    assets: merged,
   };
   fs.writeFileSync(OUT_FILE, JSON.stringify(out, null, 2));
 
   console.log("\n=== Summary ===");
   console.table(results);
+  console.log(`registry assets (${merged.length}): ${merged.map(a => a.symbol).join(", ")}`);
+  if (dropped.length) console.log(`unchanged (not in ASSETS): ${dropped.join(", ")}`);
   console.log(`Wrote ${path.relative(process.cwd(), OUT_FILE)}`);
 }
 

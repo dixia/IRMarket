@@ -9,14 +9,15 @@ import { decodeQuote } from "@/lib/decode";
 import { IRMARKET_ABI } from "@/lib/abis/market";
 import { getLogsChunked } from "@/lib/logs";
 import { useCurrentBlock } from "./useCurrentBlock";
-import { MARKET_ADDRESS, ORACLE_ADDRESS, QUOTE_TOKEN, hasWrapper, isFullyConfigured } from "@/lib/config";
+import { MARKET_ADDRESS, ORACLE_ADDRESS, QUOTE_TOKEN, CHAIN_ID, hasWrapper, isFullyConfigured } from "@/lib/config";
+import { blocksForSeconds } from "@/lib/chainParams";
 import type { Position, Side } from "@/lib/types";
 
 const SIDE_LABEL: Record<number, Side> = { 0: "bull", 1: "bear" };
 
-// Look back ~5000 blocks (~25 min @300ms) for the user's position events. The bot rolls
-// ~600-block rounds, so this covers several rounds without an expensive full scan.
-const LOOKBACK_BLOCKS = 5000n;
+// Look back ~25 min of wall-clock history for the user's position events. Derived from the
+// chain's block time so the window stays ~25 min on slower chains too.
+const LOOKBACK_BLOCKS = BigInt(blocksForSeconds(CHAIN_ID, 25 * 60));
 
 const VETO_WRAPPED_EVENT = IRMARKET_ABI.find(
   (e): e is Extract<(typeof IRMARKET_ABI)[number], { type: "event" }> => e.type === "event" && e.name === "VetoWrapped",

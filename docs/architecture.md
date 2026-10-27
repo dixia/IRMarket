@@ -211,14 +211,19 @@ settlement effectively American (accepted, spec §1.4; V1 pins it to the expiry 
 2. **Oracle binding is immutable ⇒ oracle change = downstream redeploy.** The wrapper/vault pin
    `oracle` at construction; to move to another instance, redeploy the wrapper/vault against the
    consumed address — never bend the ABI or the deployed oracle.
-3. **Test tokens are a registry, not a per-demo deploy.** `deployment-assets.json` is the token
-   book (per-symbol base tokens + HKD). Reuse by symbol (mint top-ups as needed,
+3. **Test tokens are a registry, not a per-demo deploy.** `deployment-assets.<chain-slug>.json` is
+   the token book (per-symbol base tokens + HKD). Reuse by symbol (mint top-ups as needed,
    `script/mint-demo-tokens.js`); deploying fresh tokens is a `--fresh-tokens` escape hatch, not
    the path.
 4. **Two semantics never mix** (PRD): V0.9 veto-market (wrapper; Monoracle = venue) and the LP
    vault MVP (Monoracle = price only, vault = counterparty) are two separate product surfaces on
    the same pair — keep them in separate positions/pages, and never let the vault settle against
    quotes submitted by the vault operator itself.
+5. **Registries are chain-scoped — never cross them.** Deploy scripts read/write
+   `deployment[.assets|.vault].<chain-slug>.json` (see `script/networks.js`). A registry whose
+   `chainId` differs from the run's target must be ignored, never consumed: reusing another
+   chain's token addresses would call `mint()` on the wrong contract. The legacy unsuffixed names
+   stay readable through the migration but are never written.
 
 ## 7. Product direction: per-pair vault model (documented 2026-10-15 — target, NOT yet deployed)
 

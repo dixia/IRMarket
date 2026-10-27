@@ -5,12 +5,13 @@ import { usePublicClient } from "wagmi";
 import { decodeEventLog, type AbiEvent } from "viem";
 import { VAULT_ABI } from "@/lib/abis/vault";
 import { getLogsChunked } from "@/lib/logs";
-import { VAULT_ADDRESS, VAULT_ADDRESS_RAW, hasVault } from "@/lib/config";
+import { VAULT_ADDRESS, VAULT_ADDRESS_RAW, CHAIN_ID, hasVault } from "@/lib/config";
+import { blocksForSeconds } from "@/lib/chainParams";
 import { useCurrentBlock } from "./useCurrentBlock";
 
 // PositionSettled stores the realized payout that the struct itself does not persist
 // (lp-pool-frontend-design §2/§4.5); the chunked read window mirrors usePositions.
-const LOOKBACK_BLOCKS = 5000n;
+const LOOKBACK_BLOCKS = BigInt(blocksForSeconds(CHAIN_ID, 25 * 60));
 
 const POSITION_SETTLED_EVENT = VAULT_ABI.find(
   (e): e is Extract<(typeof VAULT_ABI)[number], { type: "event" }> =>

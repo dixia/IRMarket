@@ -1,0 +1,12 @@
+# Upload hygiene for the Fuji-only Vercel project (deployed from web/).
+# The Monad project deploys from the repo root with the root .vercelignore; this one is
+# scoped to web/ because its Root Directory is the upload root.
+node_modules/
+.next/
+out/
+tests/
+test-results/
+playwright*.mts
+*.tsbuildinfo
+.env*
+README.md

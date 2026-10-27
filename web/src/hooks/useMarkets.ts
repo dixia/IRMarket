@@ -8,7 +8,8 @@ import { IRMARKET_ABI } from "@/lib/abis/market";
 import { getLogsChunked } from "@/lib/logs";
 import { useCurrentBlock } from "./useCurrentBlock";
 import { useTokenMeta } from "./useTokenMeta";
-import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, SELECTED_BASE_TOKENS, hasWrapper } from "@/lib/config";
+import { MARKET_ADDRESS, MARKET_ADDRESS_RAW, SELECTED_BASE_TOKENS, CHAIN_ID, hasWrapper } from "@/lib/config";
+import { blocksForSeconds } from "@/lib/chainParams";
 import { TOKEN_META_PENDING } from "@/lib/types";
 import type { Market, MarketWithMeta } from "@/lib/types";
 
@@ -30,7 +31,9 @@ import type { Market, MarketWithMeta } from "@/lib/types";
 const MARKET_CREATED_EVENT = IRMARKET_ABI.find(
   (e): e is Extract<(typeof IRMARKET_ABI)[number], { type: "event" }> => e.type === "event" && e.name === "MarketCreated",
 ) as AbiEvent;
-const MARKET_LOOKBACK_BLOCKS = 14_000n;
+// Cover the longest configured tenor (~70 min of wall clock) on this chain's cadence, not a
+// fixed block count tuned to Monad's 300 ms blocks.
+const MARKET_LOOKBACK_BLOCKS = BigInt(blocksForSeconds(CHAIN_ID, 70 * 60));
 
 /** Markets: whitelist-filtered event scan when curated; legacy full enumeration otherwise. */
 export function useMarkets(): MarketWithMeta[] {

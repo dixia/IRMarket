@@ -109,9 +109,11 @@ export function shortenAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function formatCountdown(blocksLeft: bigint): string {
+export function formatCountdown(blocksLeft: bigint, blockSeconds = 0.3): string {
   if (blocksLeft <= 0n) return "Expired";
-  const mins = Number(blocksLeft) / 600; // ~600 blocks ≈ 3 min
+  // Convert blocks to wall-clock minutes. Pass the chain's block time; the default matches
+  // Monad's cadence so pure formatting stays dependency-free.
+  const mins = (Number(blocksLeft) * blockSeconds) / 60;
   if (mins >= 60) return `${Math.floor(mins / 60)}h ${Math.floor(mins % 60)}m`;
   if (mins >= 1) return `${Math.floor(mins)}m ${Math.round((mins % 1) * 60)}s`;
   return `${Math.max(1, Math.round(mins * 60))}s`;

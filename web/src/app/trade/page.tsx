@@ -8,7 +8,8 @@ import { useMarkets } from "@/hooks/useMarkets";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 import { useReferencePrice } from "@/hooks/useReferencePrice";
 import { BlockCountdown } from "@/components/market/BlockCountdown";
-import { formatPrice, formatCountdown } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
+import { formatCountdown } from "@/lib/countdown";
 import { isFullyConfigured } from "@/lib/config";
 
 export default function TradePage() {

@@ -32,7 +32,8 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { shouldReuseWrapper, shouldReuseVault } from "./stack-reuse.js";
+import { shouldReuseWrapper, shouldReuseVault, sameChain } from "./stack-reuse.js";
+import { chainInfo, blockSeconds, registryFile, resolveRegistryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -100,7 +101,7 @@ if (!PRIVATE_KEY && !DRY_RUN) {
   process.exit(1);
 }
 
-const BLOCK_SECONDS = 0.3;
+const BLOCK_SECONDS = blockSeconds(CHAIN_ID);
 const E18 = 10n ** 18n;
 const MINT_BASE = ethers.parseEther("1000000");
 const MINT_QUOTE = ethers.parseEther("10000000");
@@ -112,9 +113,24 @@ function loadArtifact(rel) {
   return JSON.parse(fs.readFileSync(path.join(rootDir, "artifacts", "contracts", rel), "utf8"));
 }
 function loadJson(file) {
-  const p = path.join(rootDir, file);
+  const p = path.isAbsolute(file) ? file : path.join(rootDir, file);
   if (!fs.existsSync(p)) return null;
   try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
+}
+// A registry may only be consumed on the chain it was written for. Ignoring a mismatched
+// registry (instead of reusing its addresses) is what stops a Fuji run from calling mint()
+// on Monad addresses — or a Monad re-run from redeploying over live markets.
+function guardChain(registry, label) {
+  if (!registry) return null;
+  if (sameChain(registry, CHAIN_ID)) return registry;
+  const have = registry.chainId;
+  const haveLabel = have === undefined || have === null
+    ? "(no chainId)"
+    : `${have} (${chainInfo(have).slug})`;
+  console.warn(
+    `  ! ${label} registry is for chain ${haveLabel}; this run targets ${CHAIN_ID} (${chainInfo(CHAIN_ID).slug}) -> ignoring it, deploying fresh`,
+  );
+  return null;
 }
 function parseAssets(raw) {
   const out = [];
@@ -174,8 +190,8 @@ async function main() {
   const marketArtifact = loadArtifact("IRMarket.sol/IRMarket.json");
   const tokenArtifact = loadArtifact("MockERC20.sol/MockERC20.json");
   const vaultArtifact = loadArtifact("IRMarketVault.sol/IRMarketVault.json");
-  const registry = loadJson("deployment-assets.json");
-  const vaultRegistry = loadJson("deployment-vault.json");
+  const registry = guardChain(loadJson(resolveRegistryFile(rootDir, "assets", CHAIN_ID)), "deployment-assets");
+  const vaultRegistry = guardChain(loadJson(resolveRegistryFile(rootDir, "vault", CHAIN_ID)), "deployment-vault");
 
   const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
   const oracleAddr = await gateOracle(provider);
@@ -230,7 +246,7 @@ async function main() {
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
   const addr = await wallet.getAddress();
   console.log(`Deployer: ${addr}`);
-  console.log(`Balance:  ${ethers.formatEther(await provider.getBalance(addr))} MON\n`);
+  console.log(`Balance:  ${ethers.formatEther(await provider.getBalance(addr))} ${chainInfo(CHAIN_ID).symbol}\n`);
 
   let nonce = BigInt(await provider.send("eth_getTransactionCount", [addr, "pending"]));
   const txHashes = {};
@@ -393,7 +409,7 @@ async function main() {
 
   const now = new Date().toISOString();
   const deployment = {
-    network: "monad-testnet",
+    network: chainInfo(CHAIN_ID).slug,
     chainId: CHAIN_ID,
     deployer: addr,
     oracle: oracleAddr,
@@ -408,7 +424,7 @@ async function main() {
     timestamp: now,
   };
   const assetsOut = {
-    network: "monad-testnet",
+    network: chainInfo(CHAIN_ID).slug,
     chainId: CHAIN_ID,
     oracle: oracleAddr,
     market: market.address,
@@ -417,7 +433,7 @@ async function main() {
     assets: assetResults,
   };
   const vaultOut = {
-    network: "monad-testnet",
+    network: chainInfo(CHAIN_ID).slug,
     chainId: CHAIN_ID,
     deployer: addr,
     oracle: oracleAddr,
@@ -430,21 +446,21 @@ async function main() {
     timestamp: now,
   };
 
-  fs.writeFileSync(path.join(rootDir, "deployment.json"), JSON.stringify(deployment, null, 2));
-  fs.writeFileSync(path.join(rootDir, "deployment-assets.json"), JSON.stringify(assetsOut, null, 2));
+  fs.writeFileSync(path.join(rootDir, registryFile("deployment", CHAIN_ID)), JSON.stringify(deployment, null, 2));
+  fs.writeFileSync(path.join(rootDir, registryFile("assets", CHAIN_ID)), JSON.stringify(assetsOut, null, 2));
   if (SKIP_VAULT) {
     console.log("\n(--skip-vault: deployment-vault.json left untouched)");
   } else {
-    fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(vaultOut, null, 2));
+    fs.writeFileSync(path.join(rootDir, registryFile("vault", CHAIN_ID)), JSON.stringify(vaultOut, null, 2));
   }
 
-  console.log("\n=== Done — wrote deployment.json / deployment-assets.json / deployment-vault.json ===");
+  console.log(`\n=== Done — wrote ${registryFile("deployment", CHAIN_ID)} / ${registryFile("assets", CHAIN_ID)} / ${registryFile("vault", CHAIN_ID)} ===`);
   console.log(`  NEXT_PUBLIC_ORACLE_ADDRESS=${oracleAddr}   (consumed upstream — NEVER redeploy this script side)`);
   console.log(`  NEXT_PUBLIC_MARKET_ADDRESS=${market.address}`);
   console.log(`  NEXT_PUBLIC_BASE_TOKEN=${first.baseToken}`);
   console.log(`  NEXT_PUBLIC_QUOTE_TOKEN=${firstQuote}`);
   console.log(`  NEXT_PUBLIC_VAULT_ADDRESS=${vault?.address ?? "(unchanged — --skip-vault)"}`);
-  console.log(`\nExplorer: https://testnet.monadscan.com/address/${market.reused ? oracleAddr : market.address}`);
+  console.log(`\nExplorer: ${chainInfo(CHAIN_ID).explorer}/address/${market.reused ? oracleAddr : market.address}`);
 }
 
 main().catch((e) => {

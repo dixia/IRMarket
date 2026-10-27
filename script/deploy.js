@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { chainInfo, blocksForSeconds, registryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -28,7 +29,7 @@ function getAbi(name) {
 }
 
 async function main() {
-  console.log("=== Deploy IRMarket V0.9 stack to Monad Testnet ===\n");
+  console.log("=== Deploy IRMarket V0.9 stack ===\n");
 
   const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
@@ -36,10 +37,10 @@ async function main() {
 
   console.log(`Deployer: ${addr}`);
   const balance = await provider.getBalance(addr);
-  console.log(`Balance:  ${ethers.formatEther(balance)} MON`);
+  console.log(`Balance:  ${ethers.formatEther(balance)} ${chainInfo(CHAIN_ID).symbol}`);
 
   if (balance < ethers.parseEther("0.02")) {
-    console.error("ERROR: Insufficient MON balance for deployment.");
+    console.error(`ERROR: Insufficient ${chainInfo(CHAIN_ID).symbol} balance for deployment.`);
     process.exit(1);
   }
 
@@ -113,7 +114,7 @@ async function main() {
 
   // 4. createMarket (D-07/D-14) — marketMaker = deployer (bot will set its own if needed)
   console.log("\n[4/4] createMarket...");
-  const expiryBlock = BigInt(await provider.getBlockNumber()) + BigInt(Math.floor(EXPIRY_SECONDS / 0.3)); // ~300ms blocks
+  const expiryBlock = BigInt(await provider.getBlockNumber()) + BigInt(blocksForSeconds(CHAIN_ID, EXPIRY_SECONDS));
   console.log(`  expiryBlock ${expiryBlock} (~${EXPIRY_SECONDS}s from now)`);
   const marketC = new ethers.Contract(market.target, market.abi, wallet);
   const created = await sendCall(
@@ -130,7 +131,7 @@ async function main() {
   console.log(`  MarketCreated marketId=${marketId} feeBps=${FEE_BPS}`);
 
   const deployInfo = {
-    network: "monad-testnet",
+    network: chainInfo(CHAIN_ID).slug,
     chainId: CHAIN_ID,
     deployer: addr,
     oracle: oracle.target,
@@ -149,12 +150,12 @@ async function main() {
     },
     timestamp: new Date().toISOString(),
   };
-  const deployPath = path.join(rootDir, "deployment.json");
+  const deployPath = path.join(rootDir, registryFile("deployment", CHAIN_ID));
   fs.writeFileSync(deployPath, JSON.stringify(deployInfo, null, 2));
   console.log(`\nSaved to: ${deployPath}`);
 
   console.log(`\n=== Done ===`);
-  console.log(`Explorer: https://testnet.monadscan.com/address/${market.target}`);
+  console.log(`Explorer: ${chainInfo(CHAIN_ID).explorer}/address/${market.target}`);
   console.log(`\nAddresses to wire into .env / bot/.env / web/.env.local:`);
   console.log(`  ORACLE_ADDRESS=${oracle.target}`);
   console.log(`  MARKET_ADDRESS=${market.target}`);

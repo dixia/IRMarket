@@ -8,9 +8,15 @@
 // Values are `.trim()`ed: env vars set via `vercel env add` (or a piped shell) can carry a
 // trailing CR/LF, which silently corrupts address parsing and breaks every contract read.
 
+import { chainParams } from "./chainParams";
+
 export const RPC_URL = (process.env.NEXT_PUBLIC_RPC_URL || "https://testnet-rpc.monad.xyz").trim();
 export const CHAIN_ID = Number((process.env.NEXT_PUBLIC_CHAIN_ID || "10143").trim());
-export const EXPLORER_BASE = "https://testnet.monadscan.com";
+export const EXPLORER_BASE = (
+  process.env.NEXT_PUBLIC_EXPLORER_BASE ||
+  chainParams(CHAIN_ID).explorer ||
+  "https://testnet.monadscan.com"
+).trim();
 
 // Monoracle — the deployed oracle (per-quote expiryBlock).
 export const ORACLE_ADDRESS_RAW = (process.env.NEXT_PUBLIC_ORACLE_ADDRESS || "").trim();
@@ -71,7 +77,11 @@ export const GAS_APPROVE = 60_000n;
 export const GAS_VETO = 160_000n;
 export const GAS_WRAPPER = 260_000n;
 export const FAUCET_AMOUNT = 2000n * 10n ** 18n;
-export const MON_RESERVE_FLOOR = 10n * 10n ** 18n;
+// Native gas-token reserve floor. Monad testnet enforces a 10 MON reserve; other chains do
+// not, so the floor is 0 there. Kept as a named export for callers that warn about low gas.
+export const NATIVE_RESERVE_FLOOR = CHAIN_ID === 10143 ? 10n * 10n ** 18n : 0n;
+/** @deprecated use NATIVE_RESERVE_FLOOR (Monad-specific alias). */
+export const MON_RESERVE_FLOOR = NATIVE_RESERVE_FLOOR;
 
 export function explorerTxUrl(hash: string): string {
   return `${EXPLORER_BASE}/tx/${hash}`;

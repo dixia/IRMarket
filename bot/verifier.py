@@ -115,9 +115,9 @@ MAX_VERIFICATION_SLOTS = 12000
 # over the band and miss the at-lead submission: measured on the AWS box the loop
 # period is ~13-20 s (QuickNode serves ~1.5 s per RPC call, and a step makes 5-10
 # calls), i.e. 42-65 blocks - hence 65, not a small constant.
-NEAR_EXPIRY_LOOKBACK_BLOCKS = 65
-NEAR_EXPIRY_LOOKAHEAD_BLOCKS = 3
-NEAR_EXPIRY_POLL_SECONDS = 0.4
+NEAR_EXPIRY_LOOKBACK_BLOCKS = int(os.getenv("NEAR_EXPIRY_LOOKBACK_BLOCKS", "65"))
+NEAR_EXPIRY_LOOKAHEAD_BLOCKS = int(os.getenv("NEAR_EXPIRY_LOOKAHEAD_BLOCKS", "3"))
+NEAR_EXPIRY_POLL_SECONDS = float(os.getenv("NEAR_EXPIRY_POLL_SECONDS", "0.4"))
 # Multicall3 (n3) `aggregate3` — the minimum the bot needs to batch its per-step
 # reads. Canonical deployment: 0xcA11bde05977b3631167028862bE2a173976CA11 (Monad
 # testnet, same address web/src/lib/wagmi.ts uses).
@@ -346,11 +346,33 @@ class BotContext:
                 "could not drop web3's validation middleware (%s) — every eth_call "
                 "will cost 2 extra eth_chainid", e,
             )
-        self.chain_id = int(shared.get("chainId") or os.getenv("CHAIN_ID", "10143"))
-        actual_chain_id = self.w3.eth.chain_id
-        if actual_chain_id != self.chain_id:
+        # Chain guard: the bot is chain-agnostic by design, so a mis-pointed .env used to
+        # fail confusingly deep inside a transaction. Fail loudly instead. The expected
+        # chain comes from EXPECTED_CHAIN_ID, else the assets file's chainId, else
+        # CHAIN_ID (default: Monad testnet) — the ops-server .env sets none of them, so
+        # it keeps working.
+        expected = os.getenv("EXPECTED_CHAIN_ID")
+        if expected is not None and str(expected).strip() != "":
+            try:
+                expected_id = int(str(expected).strip())
+            except ValueError as exc:
+                raise RuntimeError(f"EXPECTED_CHAIN_ID is not an integer: {expected!r}") from exc
+        elif shared.get("chainId") is not None and str(shared.get("chainId")).strip() != "":
+            try:
+                expected_id = int(shared["chainId"])
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"assets file has a non-numeric chainId: {shared['chainId']!r}"
+                ) from exc
+        else:
+            expected_id = int(os.getenv("CHAIN_ID", "10143"))
+        try:
+            self.chain_id = int(self.w3.eth.chain_id)
+        except Exception as exc:  # noqa: BLE001 - RPC error shapes vary
+            raise RuntimeError(f"Could not read chain id from {rpc}") from exc
+        if self.chain_id != expected_id:
             raise RuntimeError(
-                f"RPC chain id {actual_chain_id} != expected {self.chain_id} ({rpc})"
+                f"RPC chain id {self.chain_id} != expected {expected_id} ({rpc})"
             )
 
         self.pk = os.environ["PRIVATE_KEY"]
@@ -490,14 +512,56 @@ class BotContext:
         return until
 
 
+_CHAIN_SLUGS = {
+    10143: "monad-testnet",
+    43113: "avalanche-fuji",
+    31337: "anvil-local",
+}
+
+
+def _registry_name(kind: str, chain_id: int) -> str:
+    stem = {
+        "deployment": "deployment",
+        "assets": "deployment-assets",
+        "vault": "deployment-vault",
+    }[kind]
+    slug = _CHAIN_SLUGS.get(int(chain_id), f"chain-{int(chain_id)}")
+    return f"{stem}.{slug}.json"
+
+
 def _resolve_assets_path(explicit: Optional[str] = None) -> Path:
     """Resolve ASSETS_FILE relative to the repo root (not the cwd); absolute
-    paths are honoured as-is."""
-    rel = explicit or os.getenv("ASSETS_FILE") or "deployment-assets.json"
-    p = Path(rel)
-    if not p.is_absolute():
-        p = Path(__file__).resolve().parent.parent / p
-    return p
+    paths are honoured as-is.
+
+    Default preference: `ASSETS_FILE` env → chain-scoped registry (using
+    `EXPECTED_CHAIN_ID` when set) → legacy `deployment-assets.json` → the single
+    scoped file if exactly one exists → the legacy name (so the error is sensible).
+    """
+    rel = explicit or os.getenv("ASSETS_FILE")
+    root = Path(__file__).resolve().parent.parent
+    if rel:
+        p = Path(rel)
+        if not p.is_absolute():
+            p = root / p
+        return p
+
+    chain_env = os.getenv("EXPECTED_CHAIN_ID")
+    if chain_env and str(chain_env).strip():
+        try:
+            scoped = root / _registry_name("assets", int(str(chain_env).strip()))
+        except ValueError:
+            scoped = None
+        if scoped is not None and scoped.is_file():
+            return scoped
+
+    legacy = root / "deployment-assets.json"
+    if legacy.is_file():
+        return legacy
+
+    matches = sorted(root.glob("deployment-assets.*.json"))
+    if len(matches) == 1:
+        return matches[0]
+    return legacy
 
 
 def persist_round(symbol: str, market_id: int, expiry_block: int, explicit: Optional[str] = None) -> bool:

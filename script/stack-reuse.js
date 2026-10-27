@@ -13,6 +13,18 @@ const addressRe = /^0x[0-9a-fA-F]{40}$/;
 const same = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
 /**
+ * A registry may only be consumed on the chain it was written for. A missing `chainId` is a
+ * rejection (NaN !== id), never an implicit pass — the safe default is "deploy fresh".
+ *
+ * @param {{ chainId?: number | string } | null} registry
+ * @param {number | string} chainId  the run's target chain
+ * @returns {boolean}
+ */
+export function sameChain(registry, chainId) {
+  return !!registry && Number(registry.chainId) === Number(chainId);
+}
+
+/**
  * IRMarket wrapper: immutable `oracle` binding. Reuse ONLY when a registry entry
  * exists, declares THIS oracle, AND the on-chain read confirms it. `freshWrapper`
  * short-circuits to false — a same-oracle rebuild (e.g. picking up new wrapper code)
