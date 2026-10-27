@@ -47,6 +47,12 @@ export const VAULT_ADDRESS_RAW = (process.env.NEXT_PUBLIC_VAULT_ADDRESS || "").t
 export const VAULT_ADDRESS = VAULT_ADDRESS_RAW as `0x${string}`;
 export const hasVault = VAULT_ADDRESS_RAW !== "";
 
+// Per-pair vault factory (IRMarketVaultFactory). When set, the vault page lists every
+// vault from the factory and can create one for a pair that has none.
+export const FACTORY_ADDRESS_RAW = (process.env.NEXT_PUBLIC_FACTORY_ADDRESS || "").trim();
+export const FACTORY_ADDRESS = FACTORY_ADDRESS_RAW as `0x${string}`;
+export const hasFactory = FACTORY_ADDRESS_RAW !== "";
+
 // Fixed gas limits. Monad charges gas_limit × price_per_gas (NOT gasUsed — on Monad
 // eth_getTransactionReceipt.gasUsed just mirrors the limit you sent), so these numbers
 // are the user's real cost and an inflated one silently overcharges every trade.

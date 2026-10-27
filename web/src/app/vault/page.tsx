@@ -7,7 +7,8 @@ import { LPPanel } from "@/components/vault/LPPanel";
 import { VaultTradePanel } from "@/components/vault/VaultTradePanel";
 import { VaultPositionsList } from "@/components/vault/VaultPositionsList";
 import { useHydrated } from "@/hooks/useHydrated";
-import { hasVault } from "@/lib/config";
+import { VaultDirectory } from "@/components/vault/VaultDirectory";
+import { hasFactory, hasVault } from "@/lib/config";
 
 type VaultTab = "lp" | "trade" | "positions";
 
@@ -17,7 +18,7 @@ export default function VaultPage() {
   const account = mounted ? address : undefined;
   const [tab, setTab] = useState<VaultTab>("lp");
 
-  if (!hasVault) {
+  if (!hasVault && !hasFactory) {
     return (
       <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
         Vault not configured.
@@ -35,7 +36,11 @@ export default function VaultPage() {
         </p>
       </section>
 
-      <PriceHeader />
+      <VaultDirectory />
+
+      {!hasVault ? null : (
+        <>
+          <PriceHeader />
 
       <div className="flex gap-2">
         <TabButton active={tab === "lp"} onClick={() => setTab("lp")}>
@@ -52,6 +57,8 @@ export default function VaultPage() {
       {tab === "lp" && <LPPanel account={account} />}
       {tab === "trade" && <VaultTradePanel account={account} />}
       {tab === "positions" && <VaultPositionsList account={account} />}
+        </>
+      )}
     </div>
   );
 }
