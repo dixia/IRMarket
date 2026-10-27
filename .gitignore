@@ -25,9 +25,13 @@ cache/compile-cache.json
 /node_modules
 deployment.json
 deployment-vault.json
+deployment.*.json
+deployment-vault*.json
 deployment-assets*.json
 .next/
 bot/.env
+bot/.env.*
+!bot/.env.example
 bot/.venv/
 __pycache__/
 web/.vercel/

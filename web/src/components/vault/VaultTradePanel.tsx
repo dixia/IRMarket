@@ -14,13 +14,18 @@ import {
   type VaultSideValue,
 } from "@/lib/vault";
 import { formatAmount, formatPrice, parseAmount } from "@/lib/format";
+import { CHAIN_ID } from "@/lib/config";
+import { blocksForSeconds } from "@/lib/chainParams";
 import { TxStatusCard, mapTransactionError, type TxState } from "@/components/common/TxStatusCard";
 
-const TENOR_PRESETS: Array<{ label: string; value: string }> = [
-  { label: "1 min ≈ 200", value: "200" },
-  { label: "3 min ≈ 600", value: "600" },
-  { label: "10 min ≈ 2000", value: "2000" },
-];
+const TENOR_PRESETS: Array<{ label: string; value: string }> = [60, 180, 600].map((seconds) => {
+  const blocks = blocksForSeconds(CHAIN_ID, seconds);
+  const mins = seconds / 60;
+  return {
+    label: `${mins >= 1 ? `${mins} min` : `${seconds}s`} ≈ ${blocks}`,
+    value: String(blocks),
+  };
+});
 
 type TradeAction = "approve" | "open";
 

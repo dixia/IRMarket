@@ -26,6 +26,7 @@ import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { chainInfo, registryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -152,7 +153,7 @@ async function main() {
   }
 
   const info = {
-    network: net.chainId === 31337n ? "anvil-local" : `chain-${net.chainId}`,
+    network: chainInfo(net.chainId).slug,
     chainId: Number(net.chainId),
     deployer: addr,
     oracle: oracle.address,
@@ -169,8 +170,8 @@ async function main() {
     },
     timestamp: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(rootDir, "deployment-vault.json"), JSON.stringify(info, null, 2));
-  console.log("\nSaved deployment-vault.json");
+  fs.writeFileSync(path.join(rootDir, registryFile("vault", net.chainId)), JSON.stringify(info, null, 2));
+  console.log(`\nSaved ${registryFile("vault", net.chainId)}`);
   console.log(`  ORACLE_ADDRESS=${oracle.address}`);
   console.log(`  PRICE_BASE=${base.address}`);
   console.log(`  SETTLEMENT_TOKEN=${quote.address}`);

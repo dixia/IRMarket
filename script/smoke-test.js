@@ -2,17 +2,19 @@ import "dotenv/config";
 import { ethers } from "ethers";
 import path from "path";
 import { fileURLToPath } from "url";
+import { resolveRegistryFile } from "./networks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
 async function main() {
   console.log("=== IRMarket Smoke Test ===\n");
+  const CHAIN_ID = Number(process.env.CHAIN_ID || 10143);
 
   const deployInfo = JSON.parse(
-    (await import("fs")).readFileSync(path.join(rootDir, "deployment.json"), "utf8")
+    (await import("fs")).readFileSync(resolveRegistryFile(rootDir, "deployment", CHAIN_ID), "utf8")
   );
-  const marketAddress = deployInfo.address;
+  const marketAddress = deployInfo.market;
   console.log(`IRMarket: ${marketAddress}`);
 
   const provider = new ethers.JsonRpcProvider(

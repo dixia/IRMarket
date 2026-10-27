@@ -84,7 +84,7 @@ Monad veto-arbitrage 长/短市场：
 ### Monad testnet
 - `eth_getLogs` 有约 100 区块范围上限，历史事件查询必须分块（5000 块回看 = 50 个 100 块窗口）。`usePositions` 曾因 `fromBlock:0→latest` 被 RPC 拒绝 + `.catch(()=>[])` 吞错而静默空白；初版 25000 块串行超时，最终方案 = 5000 块 + `Promise.all` 并行、15s 轮询。
 - 持仓由 `VetoWrapped`/`QuoteVetoed` 事件派生，无独立账本。
-- 合约已部署 Monad 测试网，地址见根目录 `deployment.json`；bot 用 `0xF5Cf…` 钱包。
+- 合约已部署 Monad 测试网，地址见根目录 `deployment.monad-testnet.json`；bot 用 `0xF5Cf…` 钱包。
 
 ### Frontend (web/)
 - `NEXT_PUBLIC_*` 必须字面量引用（Turbopack 只内联字面量，动态 `env[key]` 在浏览器为 `""`，导致配置探测失败）。
@@ -94,6 +94,7 @@ Monad veto-arbitrage 长/短市场：
 - 本地 env 在 `web/.env.local`（gitignored）。
 - 改动后先 `tsc`+`lint`+`build` 再部署；Vercel 链上 chunk 验证耗时，先本地验证。
 - Vercel 项目 `irmarket`（h-fbf5），域名 `irmarket.xyz`。**从 repo root 部署**（`npx vercel --yes` 预览 / `npx vercel --prod --yes` 生产）。项目 Root Directory（dashboard 设定）= `web`，它是**相对上传内容**解析的 build 设置：从 root 部署时上传里存在 `web/` 子目录 → build 正常；从 `web/` 里运行 CLI 会让上传根变成 web 的内容，`web/` 于是不存在 → 报 `Root Directory "web" does not exist`（实测，2026-10-17）。
+- **Avalanche Fuji 项目 `irmarket-avax`（h-fbf5，域名 `avax.irmarket.xyz`）**：独立项目、CLI-only，**从 `web/` 部署**（`cd web && npx vercel --prod --yes`）。它的 Root Directory = `.`（上传根），与上面的 `irmarket` 相反。env 全为 Fuji：`NEXT_PUBLIC_CHAIN_ID=43113`、`NEXT_PUBLIC_RPC_URL` 必须 CORS-open（`api.avax-test.network` 带 Origin 返回 403；用 `avalanche-fuji-c-chain-rpc.publicnode.com`）。`web/vercel.json` 固定 `framework: nextjs`（静态导出 `out/`）。Market 列表只扫 `MARKET_LOOKBACK_BLOCKS`（Fuji 2100 块 ≈ 1h），无 bot 时常跑轮次会老化 → 需跑 Fuji bot 或手动 roll 一轮。
 - repo root 的 `.vercel/project.json` 是 root-side 部署的 CLI link，gitignored（`.gitignore:53`）；缺失时用 `npx vercel link --project irmarket --yes` 重建。repo-root `.vercelignore`（`e83b56f`）保持上传精简并排除 `.env*`/`bot/`/`test/`/`docs/`/`node_modules`——本地 env 文件永不上传。
 - 新增/修改 `NEXT_PUBLIC_*`（如 `NEXT_PUBLIC_VAULT_ADDRESS`）：`"<value>" | npx vercel env add <NAME> <scope>`（scope = `production` / `preview`；从任意已 link 目录执行均可）；改后必须对该 scope 重新部署，值才会内联进客户端 chunk。要不动生产就先在 **Preview** scope 验证。
 
@@ -103,10 +104,25 @@ Monad veto-arbitrage 长/短市场：
 - web3 v7 异常为 `Web3RPCError`（非 `ValueError`），nonce 竞争需 `except Exception` 后重新读取 nonce。
 - `load_dotenv()` 默认不覆盖已有环境变量；用 `$env:MARKET_ID=n`（PowerShell）可覆盖 `bot/.env` 验证不同轮次。
 - 解码事件勿用 `process_receipt`（对收据中 ERC20 Transfer 等日志报 `MismatchedABI` 噪声）；按 oracle 地址 + topic0 定向抽取（`_oracle_event_id`/`_market_created_id`）。
-- **远程部署**：生产 bot 以 systemd 服务常驻在共享 ops 服务器（与 `tick_book` 同机），`Restart=always` 随崩溃自动重启、开机自启；服务器上按仓库布局放置（`bot/verifier.py` + `abi/` + hardhat `artifacts/` + `deployment-assets.json` + `bot/.env`）。**同一钱包只跑一个实例**——服务器侧在跑时本地不要再起（nonce 竞争）。服务器的连接方式 / 路径 / 密钥不在本 repo（public）记录，见 `tick_book` 仓库的 ops 文档。
+- **远程部署**：生产 bot 以 systemd 服务常驻在共享 ops 服务器（与 `tick_book` 同机），`Restart=always` 随崩溃自动重启、开机自启；服务器上按仓库布局放置（`bot/verifier.py` + `abi/` + hardhat `artifacts/` + `deployment-assets.<slug>.json` + `bot/.env`）。**同一钱包只跑一个实例**——服务器侧在跑时本地不要再起（nonce 竞争）。多链时该规则按链分别成立：不同链可用同一钱包，同链不可双开。`EXPECTED_CHAIN_ID` 保持可选（服务器 `.env` 未设置），设置后 bot 会在启动时校验 RPC 链与 registry 链。**每链一个 unit**：`irmarket-bot`（Monad，读 `bot/.env`）与 `irmarket-bot-fuji`（Fuji，`Environment=BOT_ENV_FILE=<repo>/bot/.env.fuji`）；`BOT_ENV_FILE` 未设置时回退 `bot/.env`，因此旧部署与 `scripts/ops/run_testnet_live.sh` 行为不变。服务器的连接方式 / 路径 / 密钥不在本 repo（public）记录，见 `tick_book` 仓库的 ops 文档。
 
 ### Deployment
-- 合约部署入口 `script/deploy.js`，地址结果写入 `deployment.json`，web 依赖根 env 示例。
+- 合约部署入口 `script/deploy.js`（V0.9）与 `script/deploy-market-stack.js`（生产 stack，消费上游
+  oracle），地址结果写入 chain-scoped registry（见下节）。
+- **多链（per-chain registry）**：脚本通过 `script/networks.js` 解析链参数（slug / blockSeconds /
+  explorer / native symbol）。registry 文件按链命名：
+  `deployment.<slug>.json` / `deployment-assets.<slug>.json` / `deployment-vault.<slug>.json`
+  （如 `deployment.avalanche-fuji.json`）。旧的无后缀文件名仅作**只读兼容**，不再写入。
+- **硬规则①**：绝不消费 `chainId` 与本次目标链不一致的 registry——跨链复用地址会把 `mint()` 打到
+  错链合约上（`script/stack-reuse.js` 的 `sameChain()`；`bot/verifier.py` 的链断言）。
+- **硬规则②**：IRMarket 侧脚本永不部署 Monoracle；先把上游 oracle 部署到目标链并过 A-shape 指纹门禁
+  （`script/deploy-market-stack.js` / `script/oracle-doctor.js`）。
+- **每链独立 env**：`bot/.env.monad`、`bot/.env.fuji`（`BOT_ENV_FILE` 选择）；`EXPECTED_CHAIN_ID`
+  可选，但一旦设置即强制校验。前端 `NEXT_PUBLIC_EXPLORER_BASE` 可按链覆盖，默认取
+  `script/networks.js` 同表的 chain explorer。
+- 当前链参数表：Monad testnet `10143`（0.3s/block）、Avalanche Fuji `43113`（~2s/block）、
+  anvil `31337`。新链先在 `script/networks.js` + `web/src/lib/chainParams.ts` 登记，再部署。
+- Monad 与 Fuji 共用同一份 `bot/verifier.py`、不同 `.env`——现在靠 `BOT_ENV_FILE` 区分。以后重启任一服务前确认这个变量还在，否则会重现 nonce 冲突。
 
 ### TODO tracking
 - `TODO.md` is **only an index**: each item = one GH issue link + status (OPEN/DONE/blocked).

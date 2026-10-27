@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatCountdown } from "@/lib/format";
+import { formatCountdown } from "@/lib/countdown";
 import { useCurrentBlock } from "@/hooks/useCurrentBlock";
 
 /** Expiry countdown from blocks to a target block (D-01: market property). */

@@ -10,7 +10,9 @@
     "lint": "eslint",
     "test:unit": "node --test src/lib/format.test.ts src/lib/vault.test.ts src/lib/decode.test.ts",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:video": "playwright test --config playwright.video.config.mts",
+    "test:video:fuji": "playwright test --config playwright.video.fuji.config.mts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

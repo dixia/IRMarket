@@ -7,7 +7,7 @@
  * Pure functions — no network, no compiler.
  */
 import { expect } from "chai";
-import { shouldReuseWrapper, shouldReuseVault } from "../script/stack-reuse.js";
+import { sameChain, shouldReuseWrapper, shouldReuseVault } from "../script/stack-reuse.js";
 
 const ORACLE = "0x807321100748d75a618e508de214123cb77c9f4d";
 const OLD_WRAPPER = "0x39a14b5d0c049525c3c42de57e6d4553b0df5c99";
@@ -49,6 +49,25 @@ describe("shouldReuseWrapper", () => {
     expect(shouldReuseWrapper(registry, null, ORACLE)).to.equal(false);
     expect(shouldReuseWrapper(null, ORACLE, ORACLE)).to.equal(false);
     expect(shouldReuseWrapper({ market: "0x123", oracle: ORACLE }, ORACLE, ORACLE)).to.equal(false);
+  });
+});
+
+describe("sameChain", () => {
+  it("accepts a registry written for the run's chain", () => {
+    expect(sameChain({ chainId: 10143 }, 10143)).to.equal(true);
+    expect(sameChain({ chainId: "43113" }, 43113)).to.equal(true);
+  });
+
+  it("rejects a registry from another chain", () => {
+    expect(sameChain({ chainId: 10143 }, 43113)).to.equal(false);
+    expect(sameChain({ chainId: "10143" }, 43113)).to.equal(false);
+  });
+
+  it("rejects a missing/absent registry or chainId (safe default: deploy fresh)", () => {
+    expect(sameChain(null, 10143)).to.equal(false);
+    expect(sameChain(undefined, 10143)).to.equal(false);
+    expect(sameChain({}, 10143)).to.equal(false);
+    expect(sameChain({ chainId: undefined }, 10143)).to.equal(false);
   });
 });
 

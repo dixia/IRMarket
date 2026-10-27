@@ -13,7 +13,7 @@
  * Addresses/prices come from the STAGE registry (deployment-assets.json in the stage
  * worktree root), which is by construction the same stack the preview env points at.
  */
-import { createPublicClient, createWalletClient, encodeFunctionData, http, parseAbi, type Hex } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http, parseAbi, type Chain, type Hex } from "viem";
 import { signTransaction } from "viem/actions";
 import { privateKeyToAccount } from "viem/accounts";
 import { monadTestnet } from "viem/chains";
@@ -21,6 +21,16 @@ import fs from "fs";
 import path from "path";
 
 const E18 = 10n ** 18n;
+
+/** Mirrors script/networks.js — keeps the fixture loader chain-aware. */
+const CHAIN_SLUGS: Record<number, string> = {
+  10143: "monad-testnet",
+  43113: "avalanche-fuji",
+  31337: "anvil-local",
+};
+function chainSlug(chainId: number): string {
+  return CHAIN_SLUGS[chainId] ?? `chain-${chainId}`;
+}
 
 /** Upstream (A) oracle shape — the A-shape gate's `submitQuote(...uint32)` signature. */
 export const ORACLE_ABI = parseAbi([
@@ -57,15 +67,21 @@ export interface StageStack {
  * web/), which is where deploy-market-stack.js writes it. E2E_MARKET_ID / E2E_ASSET can
  * override the asset selection.
  */
-export function loadStageStack(webDir: string, opts?: { dir?: string; asset?: string }): StageStack {
+export function loadStageStack(webDir: string, opts?: { dir?: string; asset?: string; chainId?: number }): StageStack {
   const root = opts?.dir ?? path.resolve(webDir, "..");
-  const registryPath = path.join(root, "deployment-assets.json");
+  const chainId = opts?.chainId ?? Number(process.env.E2E_CHAIN_ID ?? 10143);
+  const preferred = path.join(root, `deployment-assets.${chainSlug(chainId)}.json`);
+  const legacy = path.join(root, "deployment-assets.json");
+  const registryPath = fs.existsSync(preferred) ? preferred : legacy;
   if (!fs.existsSync(registryPath)) {
     throw new Error(
-      `stage registry not found at ${registryPath} — run deploy-market-stack.js in the stage worktree first`,
+      `stage registry not found at ${preferred} (or ${legacy}) — run deploy-market-stack.js first`,
     );
   }
   const reg = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  if (reg.chainId !== undefined && Number(reg.chainId) !== chainId) {
+    throw new Error(`registry ${registryPath} is for chain ${reg.chainId}, not ${chainId}`);
+  }
   if (!reg.oracle || !reg.market || !reg.quoteToken || !Array.isArray(reg.assets) || reg.assets.length === 0) {
     throw new Error(`stage registry at ${registryPath} is missing oracle/market/quoteToken/assets`);
   }
@@ -97,17 +113,15 @@ export interface BurnerClients {
   sendTx: (call: { to: Hex; data: Hex; gas: bigint }) => Promise<Hex>;
 }
 
-export function makeBurnerClients(opts: { rpc: string; key: `0x${string}`; stack: StageStack }): BurnerClients {
+export function makeBurnerClients(opts: { rpc: string; key: `0x${string}`; stack: StageStack; chain?: Chain }): BurnerClients {
+  const chain = opts.chain ?? monadTestnet;
   const account = privateKeyToAccount(opts.key);
-  const wallet = createWalletClient({ account, chain: monadTestnet, transport: http(opts.rpc) });
-  const publicClient = createPublicClient({ chain: monadTestnet, transport: http(opts.rpc) });
+  const wallet = createWalletClient({ account, chain, transport: http(opts.rpc) });
+  const publicClient = createPublicClient({ chain, transport: http(opts.rpc) });
 
   const sendTx: BurnerClients["sendTx"] = async (call) => {
-    const [gasPrice, nonce0] = await Promise.all([
-      publicClient.getGasPrice(),
-      publicClient.getTransactionCount({ address: account.address }),
-    ]);
-    let nonce = nonce0;
+    const gasPrice = await publicClient.getGasPrice();
+    let nonce = await publicClient.getTransactionCount({ address: account.address, blockTag: "pending" });
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const raw = await signTransaction(wallet, {
@@ -119,10 +133,16 @@ export function makeBurnerClients(opts: { rpc: string; key: `0x${string}`; stack
           value: 0n,
           type: "legacy",
         });
-        return await publicClient.sendRawTransaction({ serializedTransaction: raw });
+        const hash = await publicClient.sendRawTransaction({ serializedTransaction: raw });
+        // Wait for inclusion. Without this, consecutive fixture calls reuse a nonce (the
+        // count is read before the previous tx mines) and a public-RPC mempool rejects the
+        // second with "replacement transaction underpriced".
+        await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+        return hash;
       } catch (e) {
-        if (String(e).toLowerCase().includes("nonce")) {
-          nonce = await publicClient.getTransactionCount({ address: account.address });
+        const msg = String(e).toLowerCase();
+        if (msg.includes("nonce") || msg.includes("replacement") || msg.includes("already known")) {
+          nonce = await publicClient.getTransactionCount({ address: account.address, blockTag: "pending" });
           continue;
         }
         throw e;
@@ -181,6 +201,49 @@ export async function submitQuote(c: BurnerClients, opts: { priceMultiple: bigin
   return nextId;
 }
 
+/** Submits one ACTIVE quote at an ABSOLUTE price (1e18 fixed), returns the quoteId. */
+export async function submitQuoteAtPrice(c: BurnerClients, opts: { price: bigint; expiryBlocks: number }): Promise<bigint> {
+  const { baseToken, quoteToken, oracle } = c.stack;
+  const baseAmount = 1n * E18;
+  const quoteAmount = (baseAmount * opts.price) / E18;
+  const head = await c.publicClient.getBlockNumber();
+  const nextId = (await c.publicClient.readContract({
+    address: oracle,
+    abi: ORACLE_ABI,
+    functionName: "nextQuoteId",
+  })) as bigint;
+  const expiry = head + BigInt(opts.expiryBlocks);
+  if (expiry > head + 12_000n) throw new Error("expiry beyond the oracle's MAX_VERIFICATION_SLOTS");
+  const data = encodeFunctionData({
+    abi: ORACLE_ABI,
+    functionName: "submitQuote",
+    args: [baseToken, quoteToken, baseAmount, quoteAmount, Number(expiry)],
+  });
+  await c.sendTx({ to: oracle, data, gas: FIXTURE_GAS.submitQuote });
+  return nextId;
+}
+
+/** Waits until `quoteId` is past expiry, then settles it (leaves it as the canonical mark). */
+export async function settleAfterExpiry(c: BurnerClients, quoteId: bigint, timeoutMs = 180_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const head = await c.publicClient.getBlockNumber();
+    const q = (await c.publicClient.readContract({
+      address: c.stack.oracle,
+      abi: ORACLE_ABI,
+      functionName: "quotes",
+      args: [quoteId],
+    })) as { expiryBlock: number; status: number };
+    if (q.status !== 0) return; // already settled/vetoed by someone else
+    if (BigInt(head) > BigInt(q.expiryBlock)) {
+      await c.sendTx({ to: c.stack.oracle, data: encodeSettle(quoteId), gas: FIXTURE_GAS.settle });
+      return;
+    }
+    if (Date.now() > deadline) throw new Error("settleAfterExpiry: timed out waiting for quote expiry");
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+}
+
 /** `getLatestPrice` for the stage pair — the vault prices against this. */
 export async function getCanonicalPrice(c: BurnerClients): Promise<{ price: bigint; exists: boolean }> {
   const res = (await c.publicClient.readContract({
@@ -212,7 +275,7 @@ export async function ensureCanonicalPrice(c: BurnerClients, opts?: { expiryBloc
       args: [qid],
     })) as { expiryBlock: number; status: number };
     if (q.status !== 0) break; // already settled/vetoed by someone
-    if (BigInt(head) >= BigInt(q.expiryBlock)) {
+    if (BigInt(head) > BigInt(q.expiryBlock)) {
       await c.sendTx({ to: c.stack.oracle, data: encodeSettle(qid), gas: FIXTURE_GAS.settle });
       break;
     }
