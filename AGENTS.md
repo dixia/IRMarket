@@ -81,6 +81,12 @@ Monad veto-arbitrage 长/短市场：
 - 跑完后台栈后清理残留进程（dev server / anvil / bot），按 `CommandLine` 匹配 kill，勿凭 exe 名误杀。
 - 短命令（< ~60s）仍可直接前台执行。
 
+#### Remote ops box over SSH
+- **Batch, don't iterate.** One connection per *phase*, not one per step: ship the whole remote task as a script and run it over a single connection (`ssh <host> 'bash -s' < task.sh`), ending with one summary. A burst of short-lived connections trips the box's per-source rate limiter, which then blocks *all* access for 10 min–1 h.
+- **Detach anything long-running or service-shaped.** `ssh <host> 'setsid nohup ./deploy.sh </dev/null >deploy.log 2>&1 &'`; for systemd, `ssh <host> 'sudo -n systemctl start <unit>'` (systemd detaches by itself). Never leave a foreground remote command whose completion you do not need before the next step.
+- **Classify before retrying.** Pre-auth `banner … Not allowed at this time` / `Connection reset` = rate limiter → single attempt every ~10 min, and pass `-o ConnectionAttempts=1` (the default config retries 3× per "attempt"). `Permission denied (publickey)` = key problem → retrying cannot help, fix the key.
+- **No ControlMaster on this client.** Windows OpenSSH cannot create the AF_UNIX control socket (`getsockname failed: Not a socket`), so cut the connection *count* instead of trying to reuse a socket.
+
 ### Monad testnet
 - `eth_getLogs` 有约 100 区块范围上限，历史事件查询必须分块（5000 块回看 = 50 个 100 块窗口）。`usePositions` 曾因 `fromBlock:0→latest` 被 RPC 拒绝 + `.catch(()=>[])` 吞错而静默空白；初版 25000 块串行超时，最终方案 = 5000 块 + `Promise.all` 并行、15s 轮询。
 - 持仓由 `VetoWrapped`/`QuoteVetoed` 事件派生，无独立账本。
