@@ -31,7 +31,10 @@ export function useReferencePrice(
     abi: MONORACLE_ABI,
     functionName: "getLatestPrice",
     args: pair ? [pair.base, pair.quote] : undefined,
-    query: { enabled: isFullyConfigured && pair !== null, refetchInterval: 2000 },
+    // 5 s: getLatestPrice only moves at settle (the bot's canonical mark), and the live
+    // ACTIVE-quote mark comes through useQuotes at its own cadence — 2 s here just
+    // doubled the oracle reads without buying freshness.
+    query: { enabled: isFullyConfigured && pair !== null, refetchInterval: 5000 },
   });
 
   const settled = latestPrice.data as

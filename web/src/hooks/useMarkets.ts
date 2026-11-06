@@ -24,10 +24,12 @@ import type { Market, MarketWithMeta } from "@/lib/types";
 // while expiryBlock > now, and upstream enforces expiryBlock <= created + MAX_VERIFICATION_
 // SLOTS (12,000), so ANY live round was created within the last 12,000 blocks. Scanning
 // 14,000 (≈2h @0.3 s) therefore always covers the tradable round plus ~20 rounds of
-// history for the /trade round picker, in ~15 chunked getLogs (3 batches) — one request
-// class per poll instead of the 42+ a naive full-window scan costs. An earlier 5,000-block
-// window hid a live 1 h round ("No markets yet" with an open market) — the window must
-// exceed the longest configured tenor.
+// history for the /trade round picker. At the 100-block getLogs range every Monad-testnet
+// provider enforces (web/src/lib/logs.ts, measured 2026-11-06) that is 140 chunked
+// getLogs per scan — hence the 60 s refetch interval below: MARKET_CREATED history only
+// gains ~1 chunk per minute, so a full rescan per tick buys nothing. An earlier
+// 5,000-block window hid a live 1 h round ("No markets yet" with an open market) — the
+// window must exceed the longest configured tenor.
 const MARKET_CREATED_EVENT = IRMARKET_ABI.find(
   (e): e is Extract<(typeof IRMARKET_ABI)[number], { type: "event" }> => e.type === "event" && e.name === "MarketCreated",
 ) as AbiEvent;
@@ -142,8 +144,11 @@ export function useMarkets(): MarketWithMeta[] {
       return [...byId.values()];
     },
     enabled: publicClient !== undefined && curatedOnly,
-    refetchInterval: blockNumber !== undefined ? 15000 : 5000,
-    staleTime: 5000,
+    // 60 s: at the universal 100-block getLogs cap this event scan costs ~140 chunks, and
+    // MarketCreated only gains chunks as the bot rolls rounds — a 15 s rescan of history
+    // that gains ~1 new chunk per minute is the expensive part of the whole page.
+    refetchInterval: blockNumber !== undefined ? 60000 : 15000,
+    staleTime: 30000,
   });
 
   const wrapperMarkets = curatedOnly ? eventQuery.data ?? [] : legacyMarkets;
