@@ -72,8 +72,12 @@ They are *suggestions/caps*, not the real window: every product path passes an e
   safe but conservative.
 - **Multicall3** exists at the canonical `0xcA11bde05977b3631167028862bE2a173976CA11`, so batched
   reads work unchanged.
-- **`eth_getLogs`** allows ranges much larger than Monad's ~100 blocks; `LOG_CHUNK_BLOCKS = 975`
-  remains valid.
+- **`eth_getLogs`** allows ranges much larger than Monad's ~100 blocks, so scans stay cheap.
+  The web width is `NEXT_PUBLIC_LOG_CHUNK_BLOCKS` (web/src/lib/logs.ts): default **100** —
+  the universal floor that works on every provider — and a wide-range deployment can raise
+  it (e.g. **975** for `irmarket-avax` on publicnode) via that project's env. On Monad
+  testnet ALL providers (testnet-rpc.monad.xyz, BlockVision, thirdweb) reject anything
+  past 100 as of 2026-11-06.
 
 ## Deployed addresses — Avalanche Fuji (deployed 2026-10-20)
 

@@ -169,8 +169,11 @@ export function usePositions(address: `0x${string}` | undefined) {
       return [...wrapped, ...vetoed];
     },
     enabled: isFullyConfigured && !!address && !!publicClient,
-    refetchInterval: blockNumber !== undefined ? 15000 : 5000,
-    staleTime: 5000,
+    // 60 s: two event sources over LOOKBACK_BLOCKS cost ~100 chunked getLogs per scan at
+    // the universal 100-block cap (web/src/lib/logs.ts); positions from the closed part
+    // of history don't change after their block, so the rescan only needs the newest tail.
+    refetchInterval: blockNumber !== undefined ? 60000 : 15000,
+    staleTime: 30000,
   });
 
   return { positions: query.data ?? [], refetch: query.refetch, status: query.status };

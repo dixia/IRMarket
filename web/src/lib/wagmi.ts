@@ -49,6 +49,11 @@ export const config = createConfig({
   transports: {
     [chain.id]: http(RPC_URL),
   },
+  // Multicall batching. wagmi already defaults to `{ multicall: true }`, but spell it
+  // out: every RPC request costs quota on the shared provider, and useReferencePrice /
+  // useBalances / useQuotes fire several readContract calls per tick — `wait: 32`
+  // collapses those into ONE Multicall3 eth_call per tick instead of one per hook.
+  batch: { multicall: { wait: 32 } },
 });
 
 declare module "wagmi" {

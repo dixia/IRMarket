@@ -1,15 +1,27 @@
-// Shared chunked eth_getLogs helper. Monad testnet RPCs cap eth_getLogs at a ~100-block
-// range, so event history must be fetched in chunked windows (verified: "eth_getLogs is
-// limited to a 100 range"). Extracted from usePositions so other event-derived hooks
-// (useMarkets whitelist path) reuse the same transport without duplicating it.
+// Shared chunked eth_getLogs helper. Event history must be fetched in chunked windows:
+// Monad testnet providers cap eth_getLogs at 100 blocks (2026-11-06, measured with BOTH
+// dense and topic-filtered scans): testnet-rpc.monad.xyz / thirdweb return -32602
+// "block range too large" and BlockVision -32613 "log response size exceeded" past 100,
+// while avalanche-fuji publicnode allows ~1000 (docs/chain-params.md). So the width is a
+// per-deployment env knob (`NEXT_PUBLIC_LOG_CHUNK_BLOCKS`, default = the 100-block floor
+// that works everywhere), NOT a constant to guess. The env var is read as a bare literal
+// (Turbopack only inlines bare `process.env.NEXT_PUBLIC_*` references — AGENTS.md, web/).
 import type { Address, AbiEvent } from "viem";
 import { usePublicClient } from "wagmi";
 
-// Chunk width. The provider caps eth_getLogs ranges itself (QuikNode testnet measures
-// "eth_getLogs is limited to a 1,000 range"), so 975-block chunks are legal and cut a
-// 5,000-block scan from 50 requests to 6 — the whole difference between a burst that
-// survives the RPC's rate cap and one that gets 429ed. Widen within the cap, never past it.
-const LOG_CHUNK_BLOCKS = 975n;
+// Verified everywhere-cap: a window this narrow always fits, on every provider tested.
+const MIN_SAFE_CHUNK = 100n;
+
+const CONFIGURED_CHUNK = (() => {
+  const raw = process.env.NEXT_PUBLIC_LOG_CHUNK_BLOCKS;
+  if (!raw) return null;
+  const n = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n < Number(MIN_SAFE_CHUNK)) return null;
+  return BigInt(n);
+})();
+
+/** Configured width (environment), falling back to the universal 100-block floor. */
+export const LOG_CHUNK_BLOCKS = CONFIGURED_CHUNK ?? MIN_SAFE_CHUNK;
 
 export type PublicClientT = NonNullable<ReturnType<typeof usePublicClient>>;
 
@@ -24,7 +36,12 @@ export interface RawLog {
  * `newestFirst` returns the windows in descending order (latest window first), which lets
  * callers scan for the newest data and stop early.
  */
-export function blockWindows(fromBlock: bigint, toBlock: bigint, chunk = LOG_CHUNK_BLOCKS, newestFirst = false) {
+export function blockWindows(
+  fromBlock: bigint,
+  toBlock: bigint,
+  chunk: bigint = LOG_CHUNK_BLOCKS,
+  newestFirst = false,
+) {
   const windows: Array<{ from: bigint; to: bigint }> = [];
   for (let from = fromBlock; from <= toBlock; from += chunk) {
     const to = from + chunk - 1n > toBlock ? toBlock : from + chunk - 1n;
@@ -33,35 +50,67 @@ export function blockWindows(fromBlock: bigint, toBlock: bigint, chunk = LOG_CHU
   return newestFirst ? windows.reverse() : windows;
 }
 
-/** eth_getLogs helper that paginates in ≤100-block chunks to satisfy RPC range limits. */
+const PROVIDER_CAP_ERRORS = [
+  "block range too large", // -32602 (testnet-rpc.monad.xyz, thirdweb)
+  "log response size exceeded", // -32613 (BlockVision)
+];
+
+function isProviderCapError(e: unknown): boolean {
+  const msg = String((e as { message?: string } | undefined)?.message ?? e).toLowerCase();
+  return PROVIDER_CAP_ERRORS.some((p) => msg.includes(p));
+}
+
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+/** eth_getLogs over [fromBlock,toBlock] in chunks; per-chunk retries AND a cap-shrink retry. */
 export async function getLogsChunked(
   publicClient: PublicClientT,
   params: { address: Address; event?: AbiEvent; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint },
 ): Promise<RawLog[]> {
   const ranges = blockWindows(params.fromBlock, params.toBlock);
 
-  // Fetch in small batches with per-chunk retries: firing 50 getLogs at once trips
-  // provider rate limits (429), and silently dropping one chunk silently hides whatever
-  // logs it holds (e.g. the newest MarketCreated — exactly the data the user came for).
+  // Fetch in small batches: firing every chunk at once trips provider rate limits (429),
+  // and silently dropping a chunk silently hides whatever logs it holds (e.g. the newest
+  // MarketCreated — exactly the data the user came for).
   const fail = (msg: string, e: unknown) => {
     if (process.env.NODE_ENV !== "production") console.warn(msg, e);
   };
+  const fetchOnce = async (r: { from: bigint; to: bigint }): Promise<RawLog[]> => {
+    const logs = await publicClient.getLogs({
+      address: params.address,
+      event: params.event,
+      args: params.args,
+      fromBlock: r.from,
+      toBlock: r.to,
+    });
+    return logs.map((l) => ({
+      data: l.data,
+      topics: l.topics as [`0x${string}`, ...`0x${string}`[]],
+      blockNumber: BigInt(l.blockNumber),
+    }));
+  };
+
   const one = async (r: { from: bigint; to: bigint }): Promise<RawLog[]> => {
+    let lastErr: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise((res) => setTimeout(res, 400 * attempt));
+      if (attempt > 0) await sleep(400 * attempt);
       try {
-        const logs = await publicClient.getLogs({
-          address: params.address,
-          event: params.event,
-          args: params.args,
-          fromBlock: r.from,
-          toBlock: r.to,
-        });
-        return logs.map((l) => ({ data: l.data, topics: l.topics as `0x${string}`[], blockNumber: BigInt(l.blockNumber) }));
+        return await fetchOnce(r);
       } catch (e) {
-        if (attempt === 2) fail("getLogsChunked: chunk failed after retries", e);
+        lastErr = e;
+        if (isProviderCapError(e)) break; // the same width can never succeed — shrink instead
       }
     }
+    // The cap can move under our feet (provider-side change, a deployment reusing this
+    // helper on another chain): shrink to the verified floor and retry once instead of
+    // returning an empty window for a range that is merely too wide.
+    const width = r.to - r.from + 1n;
+    if (lastErr !== undefined && isProviderCapError(lastErr) && width > MIN_SAFE_CHUNK) {
+      const subs = blockWindows(r.from, r.to, MIN_SAFE_CHUNK);
+      const parts = await Promise.all(subs.map((s) => one(s)));
+      return parts.flat();
+    }
+    fail("getLogsChunked: chunk failed after retries", lastErr);
     return [];
   };
 
@@ -69,7 +118,7 @@ export async function getLogsChunked(
   const out: RawLog[] = [];
   for (let i = 0; i < ranges.length; i += GET_LOGS_CONCURRENCY) {
     const batch = ranges.slice(i, i + GET_LOGS_CONCURRENCY);
-    const results = await Promise.all(batch.map(one));
+    const results = await Promise.all(batch.map((r) => one(r)));
     out.push(...results.flat());
   }
   return out;
